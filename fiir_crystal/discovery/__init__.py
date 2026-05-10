@@ -7,6 +7,13 @@ from fiir_crystal.discovery.interfaces import (
     ScreeningAdapter,
     ValidationAdapter,
 )
+from fiir_crystal.discovery.mock_pipeline import (
+    MockDiscoveryPipeline,
+    MockFeedbackSink,
+    MockRanker,
+    MockScreeningAdapter,
+    MockValidationAdapter,
+)
 from fiir_crystal.discovery.records import (
     AcquisitionScore,
     BudgetTier,
@@ -30,6 +37,11 @@ __all__ = [
     "DiscoveryRun",
     "FeedbackRecord",
     "FeedbackSink",
+    "MockDiscoveryPipeline",
+    "MockFeedbackSink",
+    "MockRanker",
+    "MockScreeningAdapter",
+    "MockValidationAdapter",
     "RankedCandidate",
     "Ranker",
     "ScreeningAdapter",

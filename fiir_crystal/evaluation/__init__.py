@@ -10,6 +10,8 @@ from fiir_crystal.evaluation.metrics import (
     MetricReport,
     MetricValue,
     PreferenceMetricComputer,
+    SimpleEvaluationReport,
+    evaluate_mock_fiir_loop,
 )
 
 __all__ = [
@@ -22,4 +24,6 @@ __all__ = [
     "MetricReport",
     "MetricValue",
     "PreferenceMetricComputer",
+    "SimpleEvaluationReport",
+    "evaluate_mock_fiir_loop",
 ]

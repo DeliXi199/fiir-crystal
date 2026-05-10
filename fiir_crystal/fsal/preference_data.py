@@ -84,6 +84,12 @@ class PreferencePair:
     failure_bucket: FailureBucket = FailureBucket.UNKNOWN
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def confidence(self) -> float:
+        """Alias used by the mock demo output."""
+
+        return self.label_confidence
+
 
 @dataclass(slots=True)
 class PreferenceDataset:

@@ -1,6 +1,10 @@
 """Failure-Structured Alignment Learning skeleton."""
 
-from fiir_crystal.fsal.pair_mining import MatchedAxisAlignedPairMiner, PairMiningSummary
+from fiir_crystal.fsal.pair_mining import (
+    AxisAlignedPairMiner,
+    MatchedAxisAlignedPairMiner,
+    PairMiningSummary,
+)
 from fiir_crystal.fsal.preference_data import (
     FailureBucket,
     LabeledCandidate,
@@ -22,6 +26,7 @@ __all__ = [
     "DPOTrainingConfig",
     "FSALTrainer",
     "FailureBucket",
+    "AxisAlignedPairMiner",
     "LabeledCandidate",
     "MatchedAxisAlignedPairMiner",
     "MatchedPairConfig",

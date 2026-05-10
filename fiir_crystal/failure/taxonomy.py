@@ -97,6 +97,28 @@ class FailureScore:
 
 
 @dataclass(slots=True)
+class FailureVector:
+    """Compact F1/F2/F3 vector used by mock demos and lightweight adapters."""
+
+    sample_id: str
+    f1_geometry: float
+    f2_chemistry: float
+    f3_stability: float | None
+    confidence: float = 0.0
+    uncertainty: float = 0.0
+    calibration_tier: int = int(CalibrationTier.TIER_4)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_stable(self) -> bool | None:
+        """Return the default FIIR stability decision when F3 is available."""
+
+        if self.f3_stability is None:
+            return None
+        return self.f3_stability < 0.1
+
+
+@dataclass(slots=True)
 class FailureLabel:
     """Complete FIIR failure label for a candidate structure."""
 
