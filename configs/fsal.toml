@@ -1,0 +1,13 @@
+# Placeholder FSAL configuration. This does not enable training by itself.
+
+[pair_mining]
+main_axis_threshold = 0.3
+other_axis_threshold = 0.15
+atom_count_tolerance = 0.2
+min_pair_quality = 0.3
+
+[trainer]
+objective = "cw_margin_dpo"
+beta = 0.1
+batch_size = 32
+max_epochs = 0

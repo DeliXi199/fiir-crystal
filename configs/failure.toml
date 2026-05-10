@@ -1,0 +1,14 @@
+# Placeholder failure-labeling configuration.
+
+[pre_filter]
+min_distance_angstrom = 0.5
+min_lattice_angle_deg = 20.0
+max_lattice_angle_deg = 160.0
+min_density_g_cm3 = 0.5
+max_density_g_cm3 = 25.0
+
+[calibration_tiers]
+tier_1_weight = 1.0
+tier_2_weight = 0.8
+tier_3_weight = 0.5
+tier_4_weight = 0.2

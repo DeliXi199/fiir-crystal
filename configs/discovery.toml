@@ -1,0 +1,18 @@
+# Placeholder discovery-pipeline configuration.
+
+[budget]
+n_generate = 0
+top_k_validation_tasks = 0
+
+[acquisition]
+success_weight = 0.4
+novelty_weight = 0.2
+diversity_weight = 0.15
+uncertainty_weight = 0.15
+cost_weight = 0.1
+
+[adapters]
+mlip = "unavailable"
+dft = "unavailable"
+synthesizability = "unavailable"
+novelty = "local_or_unavailable"
