@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Any
 
 from fiir_crystal.evaluation import MetricReport
-from fiir_crystal.failure import FailureLabel
+from fiir_crystal.failure import FailureLabel, FailureVector
 
 
 class ScreeningStatus(str, Enum):
@@ -83,6 +83,7 @@ class DiscoveryCandidate:
     source_model: str | None = None
     round_id: str | None = None
     failure_label: FailureLabel | None = None
+    failure_vector: FailureVector | None = None
     predicted_failure: dict[str, Any] | None = None
     screening_records: list[ScreeningDecision] = field(default_factory=list)
     ranking_record: dict[str, Any] | None = None
@@ -139,6 +140,11 @@ class FeedbackRecord:
     use_for_predictor: bool = False
     use_for_fsal: bool = False
     notes: str = ""
+    selected_rank: int | None = None
+    failure_vector: FailureVector | None = None
+    decision: str | None = None
+    reason: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

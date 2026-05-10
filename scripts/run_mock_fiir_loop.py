@@ -1,4 +1,4 @@
-"""Run the first mock FIIR minimum-loop demo."""
+"""Run the lightweight FIIR-v1 mock closed-loop demo."""
 
 from __future__ import annotations
 
@@ -11,81 +11,110 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from fiir_crystal.discovery import MockDiscoveryPipeline
 from fiir_crystal.evaluation import evaluate_mock_fiir_loop
-from fiir_crystal.failure import MockFailureLabeler, demo_mock_crystals
+from fiir_crystal.failure import FailureOracle, StructureLike, demo_mock_crystals
 from fiir_crystal.fsal import AxisAlignedPairMiner, LabeledCandidate, MatchedPairConfig
 
 
-def _to_labeled_candidates(labeler: MockFailureLabeler, crystals) -> list[LabeledCandidate]:
-    labels = {label.sample_id: label for label in labeler.label_crystals(crystals).labels}
-    return [
-        LabeledCandidate(
-            sample_id=crystal.sample_id,
-            structure_ref=crystal.structure_ref,
-            failure_label=labels[crystal.sample_id],
-            chemical_bucket=crystal.chemical_bucket,
-            atom_count=crystal.num_atoms,
-            space_group=crystal.space_group,
-            prototype=crystal.prototype,
-            metadata={"composition": crystal.composition},
+def build_labeled_candidates(
+    oracle: FailureOracle,
+    structures: list[StructureLike],
+) -> list[LabeledCandidate]:
+    """Build FSAL candidates from lightweight structures and oracle outputs."""
+
+    candidates: list[LabeledCandidate] = []
+    for structure in structures:
+        vector = oracle.vectorize(structure)
+        label = oracle.label_structure(structure)
+        candidates.append(
+            LabeledCandidate(
+                sample_id=structure.sample_id,
+                structure_ref=structure.structure_ref,
+                failure_label=label,
+                failure_vector=vector,
+                chemical_bucket=structure.chemical_bucket,
+                atom_count=structure.num_atoms,
+                space_group=structure.space_group,
+                prototype=structure.prototype,
+                metadata={
+                    "composition": structure.composition,
+                    "composition_family": structure.prototype or structure.composition,
+                },
+            )
         )
-        for crystal in crystals
-    ]
+    return candidates
 
 
 def main() -> None:
-    crystals = demo_mock_crystals()
-    labeler = MockFailureLabeler()
+    structures = demo_mock_crystals()
+    oracle = FailureOracle.default()
 
     print("Loaded mock candidates:")
-    for crystal in crystals:
+    for structure in structures:
         print(
-            f"  {crystal.sample_id}: composition={crystal.composition}, "
-            f"prototype={crystal.prototype}, atoms={crystal.num_atoms}"
+            f"  {structure.candidate_id}: composition={structure.composition}, "
+            f"prototype={structure.prototype}, atoms={structure.num_atoms}, "
+            f"space_group={structure.space_group}"
         )
 
-    label_batch = labeler.label_crystals(crystals)
-    print("\nFailure vectors:")
-    for label in label_batch.labels:
+    labels = [oracle.label_structure(structure) for structure in structures]
+    vectors = [oracle.vectorize(structure) for structure in structures]
+    print("\nFailureOracle vectors:")
+    for vector in vectors:
+        hard = ",".join(vector.hard_failures) if vector.hard_failures else "none"
         print(
-            f"  {label.sample_id}: F1={label.f1_geometry:.2f}, "
-            f"F2={label.f2_chemistry:.2f}, F3={label.f3_stability:.2f}, "
-            f"tier={label.calibration_tier}"
+            f"  {vector.candidate_id}: F1={vector.f1_geometry:.2f}, "
+            f"F2={vector.f2_chemistry:.2f}, F3={vector.f3_stability:.2f}, "
+            f"tier={vector.calibration_tier}, confidence={vector.confidence:.2f}, "
+            f"valid={vector.is_valid}, hard_failures={hard}"
         )
 
-    labeled_candidates = _to_labeled_candidates(labeler, crystals)
+    labeled_candidates = build_labeled_candidates(oracle, structures)
     miner = AxisAlignedPairMiner()
     pair_dataset = miner.mine(
         labeled_candidates,
-        config=MatchedPairConfig(min_pair_quality=0.05),
+        config=MatchedPairConfig(
+            min_pair_quality=0.05,
+            require_prototype_match=True,
+            require_space_group_match=False,
+        ),
     )
 
-    print("\nPreference pairs:")
+    print("\nMatched axis-aligned preference pairs:")
     for pair in pair_dataset.pairs:
         print(
             f"  {pair.pair_id}: winner={pair.winner_id}, loser={pair.loser_id}, "
             f"axis={pair.axis.value}, margin={pair.margin:.2f}, "
-            f"confidence={pair.confidence:.2f}"
+            f"confidence={pair.confidence:.2f}, reason={pair.reason}, "
+            f"match={pair.match_metadata}"
         )
 
-    report = evaluate_mock_fiir_loop(label_batch.labels, pair_dataset.pairs)
+    report = evaluate_mock_fiir_loop(labels, pair_dataset.pairs)
     print("\nEvaluation report:")
     for key, value in report.as_dict().items():
         print(f"  {key}: {value}")
 
-    discovery = MockDiscoveryPipeline(labeler=labeler, top_k=3)
-    run = discovery.run_crystals(crystals)
+    discovery = MockDiscoveryPipeline(oracle=oracle, top_k=3)
+    run = discovery.run_structures(structures)
 
     print("\nMock discovery ranking:")
     for ranked in run.ranked_candidates[:3]:
         print(
             f"  rank={ranked.rank}, candidate={ranked.candidate_id}, "
             f"utility={ranked.acquisition.utility:.3f}, "
-            f"success={ranked.acquisition.success_score:.3f}"
+            f"success={ranked.acquisition.success_score:.3f}, "
+            f"novelty={ranked.acquisition.novelty_score:.3f}, "
+            f"diversity={ranked.acquisition.diversity_score:.3f}"
         )
 
     print("\nTop-k feedback records:")
     for feedback in run.feedback_records:
-        print(f"  {feedback.feedback_id}: candidate={feedback.candidate_id}")
+        vector = feedback.failure_vector
+        print(
+            f"  {feedback.feedback_id}: candidate={feedback.candidate_id}, "
+            f"rank={feedback.selected_rank}, decision={feedback.decision}, "
+            f"reason={feedback.reason}, F=({vector.f1_geometry:.2f}, "
+            f"{vector.f2_chemistry:.2f}, {vector.f3_stability:.2f})"
+        )
 
 
 if __name__ == "__main__":

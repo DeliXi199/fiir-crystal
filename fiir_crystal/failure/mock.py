@@ -26,10 +26,10 @@ from fiir_crystal.failure.taxonomy import (
 
 
 @dataclass(slots=True)
-class CrystalRecord:
-    """Lightweight mock crystal record for demo runs."""
+class StructureLike:
+    """Lightweight structure-like record with no crystal toolkit dependency."""
 
-    sample_id: str
+    candidate_id: str
     composition: str
     num_atoms: int
     space_group: int | None = None
@@ -37,13 +37,22 @@ class CrystalRecord:
     mock_geometry_score: float = 0.0
     mock_chemistry_score: float = 0.0
     mock_stability_score: float | None = None
+    lattice_lengths: tuple[float, float, float] | None = None
+    lattice_angles: tuple[float, float, float] | None = None
+    frac_coords: tuple[tuple[float, float, float], ...] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def sample_id(self) -> str:
+        """Backward-compatible alias for earlier mock demos."""
+
+        return self.candidate_id
 
     @property
     def structure_ref(self) -> str:
         """Stable mock structure reference."""
 
-        return f"mock://{self.sample_id}"
+        return f"mock://{self.candidate_id}"
 
     @property
     def chemical_bucket(self) -> str:
@@ -67,6 +76,10 @@ class CrystalRecord:
                 **self.metadata,
             },
         )
+
+
+class CrystalRecord(StructureLike):
+    """Backward-compatible name for the lightweight mock structure record."""
 
 
 def _severity_for_unit_interval(value: float | None) -> FailureSeverity:
@@ -98,8 +111,8 @@ class MockFailureLabeler(FailureLabeler):
 
     def __init__(
         self,
-        calibration_tier: int = int(CalibrationTier.TIER_4),
-        tier_source: str = TierSource.RULES_ONLY.value,
+        calibration_tier: int = int(CalibrationTier.TIER_1),
+        tier_source: str = TierSource.MOCK_ONLY.value,
     ) -> None:
         self.calibration_tier = calibration_tier
         self.tier_source = tier_source
@@ -116,6 +129,9 @@ class MockFailureLabeler(FailureLabeler):
             confidence=confidence,
             uncertainty=1.0 - confidence,
             calibration_tier=self.calibration_tier,
+            is_valid=crystal.num_atoms > 0,
+            hard_failures=[] if crystal.num_atoms > 0 else ["empty_structure"],
+            structure_ref=crystal.structure_ref,
             metadata={
                 "composition": crystal.composition,
                 "num_atoms": crystal.num_atoms,
@@ -207,13 +223,97 @@ def demo_mock_crystals() -> list[CrystalRecord]:
     """Return a deterministic toy crystal set that exercises all FIIR axes."""
 
     return [
-        CrystalRecord("geo_good", "CaTiO3", 5, 221, "perovskite", 0.02, 0.05, 0.08),
-        CrystalRecord("geo_bad", "SrTiO3", 5, 221, "perovskite", 0.55, 0.06, 0.09),
-        CrystalRecord("chem_good", "BaZrO3", 5, 221, "perovskite", 0.04, 0.03, 0.12),
-        CrystalRecord("chem_bad", "BaSnO3", 5, 221, "perovskite", 0.05, 0.48, 0.13),
-        CrystalRecord("stable_good", "MgAl2O4", 7, 227, "spinel", 0.03, 0.04, 0.06),
-        CrystalRecord("stable_bad", "ZnAl2O4", 7, 227, "spinel", 0.04, 0.05, 0.42),
-        CrystalRecord("stable_worse", "CdAl2O4", 7, 227, "spinel", 0.05, 0.06, 0.72),
+        CrystalRecord(
+            "geo_good",
+            "CaTiO3",
+            5,
+            221,
+            "perovskite",
+            0.02,
+            0.05,
+            0.08,
+            (3.8, 3.8, 3.8),
+            (90.0, 90.0, 90.0),
+            ((0.0, 0.0, 0.0), (0.5, 0.5, 0.5), (0.5, 0.5, 0.0), (0.5, 0.0, 0.5), (0.0, 0.5, 0.5)),
+        ),
+        CrystalRecord(
+            "geo_bad",
+            "SrTiO3",
+            5,
+            221,
+            "perovskite",
+            0.55,
+            0.06,
+            0.09,
+            (3.9, 3.9, 3.9),
+            (90.0, 90.0, 90.0),
+            ((0.0, 0.0, 0.0), (0.02, 0.02, 0.02), (0.5, 0.5, 0.0), (0.5, 0.0, 0.5), (0.0, 0.5, 0.5)),
+        ),
+        CrystalRecord(
+            "chem_good",
+            "BaZrO3",
+            5,
+            221,
+            "perovskite",
+            0.04,
+            0.03,
+            0.12,
+            (4.1, 4.1, 4.1),
+            (90.0, 90.0, 90.0),
+            ((0.0, 0.0, 0.0), (0.5, 0.5, 0.5), (0.5, 0.5, 0.0), (0.5, 0.0, 0.5), (0.0, 0.5, 0.5)),
+        ),
+        CrystalRecord(
+            "chem_bad",
+            "BaSnO3",
+            5,
+            221,
+            "perovskite",
+            0.05,
+            0.48,
+            0.13,
+            (4.1, 4.1, 4.1),
+            (90.0, 90.0, 90.0),
+            ((0.0, 0.0, 0.0), (0.5, 0.5, 0.5), (0.5, 0.5, 0.0), (0.5, 0.0, 0.5), (0.0, 0.5, 0.5)),
+        ),
+        CrystalRecord(
+            "stable_good",
+            "MgAl2O4",
+            7,
+            227,
+            "spinel",
+            0.03,
+            0.04,
+            0.06,
+            (8.1, 8.1, 8.1),
+            (90.0, 90.0, 90.0),
+            ((0.0, 0.0, 0.0), (0.25, 0.25, 0.25), (0.5, 0.5, 0.5), (0.75, 0.75, 0.75), (0.5, 0.0, 0.0), (0.0, 0.5, 0.0), (0.0, 0.0, 0.5)),
+        ),
+        CrystalRecord(
+            "stable_bad",
+            "ZnAl2O4",
+            7,
+            227,
+            "spinel",
+            0.04,
+            0.05,
+            0.42,
+            (8.0, 8.0, 8.0),
+            (90.0, 90.0, 90.0),
+            ((0.0, 0.0, 0.0), (0.25, 0.25, 0.25), (0.5, 0.5, 0.5), (0.75, 0.75, 0.75), (0.5, 0.0, 0.0), (0.0, 0.5, 0.0), (0.0, 0.0, 0.5)),
+        ),
+        CrystalRecord(
+            "stable_worse",
+            "CdAl2O4",
+            7,
+            227,
+            "spinel",
+            0.05,
+            0.06,
+            0.72,
+            (8.2, 8.2, 8.2),
+            (90.0, 90.0, 90.0),
+            ((0.0, 0.0, 0.0), (0.25, 0.25, 0.25), (0.5, 0.5, 0.5), (0.75, 0.75, 0.75), (0.5, 0.0, 0.0), (0.0, 0.5, 0.0), (0.0, 0.0, 0.5)),
+        ),
     ]
 
 

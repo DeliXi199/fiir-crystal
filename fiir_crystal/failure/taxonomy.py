@@ -33,6 +33,7 @@ class FailureSeverity(str, Enum):
 class CalibrationTier(IntEnum):
     """Calibration tier used to propagate label confidence."""
 
+    TIER_0 = 0
     TIER_1 = 1
     TIER_2 = 2
     TIER_3 = 3
@@ -42,6 +43,9 @@ class CalibrationTier(IntEnum):
 class TierSource(str, Enum):
     """Provenance for a calibration tier."""
 
+    INVALID = "invalid"
+    MOCK_ONLY = "mock_only"
+    RULE_BASED = "rule_based"
     DFT_PROVIDED = "dft_provided"
     MULTI_ADAPTER_AGREEMENT = "multi_adapter_agreement"
     SINGLE_ADAPTER = "single_adapter"
@@ -54,10 +58,11 @@ def tier_weight(tier: int | CalibrationTier) -> float:
     """Return the default confidence weight for a calibration tier."""
 
     return {
-        1: 1.0,
-        2: 0.8,
-        3: 0.5,
-        4: 0.2,
+        0: 0.0,
+        1: 0.5,
+        2: 0.7,
+        3: 0.85,
+        4: 1.0,
     }.get(int(tier), 0.0)
 
 
@@ -107,7 +112,16 @@ class FailureVector:
     confidence: float = 0.0
     uncertainty: float = 0.0
     calibration_tier: int = int(CalibrationTier.TIER_4)
+    is_valid: bool = True
+    hard_failures: list[str] = field(default_factory=list)
+    structure_ref: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def candidate_id(self) -> str:
+        """Alias used by discovery code."""
+
+        return self.sample_id
 
     @property
     def is_stable(self) -> bool | None:
@@ -148,6 +162,8 @@ class FailureLabel:
             self.is_near_miss = 0.1 <= self.f3_stability <= 0.2
             self.is_moderate = 0.2 < self.f3_stability <= 0.5
             self.is_catastrophic = self.f3_stability > 0.5 or self.pre_filtered
+        elif self.pre_filtered:
+            self.is_catastrophic = True
 
 
 @dataclass(slots=True)

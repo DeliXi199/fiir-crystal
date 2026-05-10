@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from fiir_crystal.failure import FailureLabel
+from fiir_crystal.failure import FailureLabel, FailureVector
 
 
 class PreferenceAxis(str, Enum):
@@ -40,6 +40,7 @@ class LabeledCandidate:
     space_group: int | None = None
     prototype: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    failure_vector: FailureVector | None = None
 
 
 @dataclass(slots=True)
@@ -49,6 +50,9 @@ class MatchedPairConfig:
     main_axis_threshold: float = 0.3
     other_axis_threshold: float = 0.15
     atom_count_tolerance: float = 0.2
+    require_prototype_match: bool = True
+    require_space_group_match: bool = False
+    require_composition_family_match: bool = False
     min_structure_match_score: float = 0.0
     min_pair_quality: float = 0.3
     max_pairs_per_axis: int | None = None
@@ -82,6 +86,8 @@ class PreferencePair:
     margin: float = 0.0
     weight: float = 0.0
     failure_bucket: FailureBucket = FailureBucket.UNKNOWN
+    match_metadata: dict[str, Any] = field(default_factory=dict)
+    reason: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property

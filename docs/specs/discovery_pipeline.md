@@ -201,3 +201,14 @@ Discovery 使用前面模块的结果形成闭环末端：
 - Ranking 输出 Pareto layer、rank 和 selection reason。
 - Validation 只生成任务元数据，不执行 DFT/MLIP/CSLLM。
 - FeedbackRecord 能被后续 failure buffer 和 FSAL preference mining 消费。
+
+## 当前 Lightweight 实现说明
+
+当前 `MockDiscoveryPipeline` 已实现本地 active discovery skeleton：
+
+- 输入 `StructureLike` / `CrystalRecord` 或已有 `DiscoveryCandidate`。
+- 使用 `FailureOracle` 生成 `FailureVector` 和兼容 `FailureLabel`。
+- `MockScreeningAdapter` 按 validity 和 aggregate failure score 筛选。
+- `MockRanker` 使用 utility-style ranking，考虑 lower F1/F2/F3、higher confidence、validity、novelty placeholder、diversity placeholder 和简单 cost。
+- `MockValidationAdapter` 只生成 validation task metadata，不运行外部验证。
+- `MockFeedbackSink` 输出 top-k feedback records，包含 candidate id、selected rank、failure vector、decision、reason 和 metadata。

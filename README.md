@@ -38,6 +38,21 @@ The intended FIIR minimum loop is:
 5. evaluate validity, stability, novelty, diversity, and failure rates;
 6. pass ranked candidates into discovery validation-task metadata and feedback.
 
+## Current Mock Closed Loop
+
+The repository now includes a runnable lightweight FIIR-v1 demo:
+
+```bash
+python scripts/run_mock_fiir_loop.py
+```
+
+The demo uses `StructureLike`/`CrystalRecord` objects with mock metadata, runs
+`FailureOracle` over lightweight F1/F2/F3 labelers, mines matched axis-aligned
+preference pairs, computes an evaluation report, ranks candidates with a mock
+discovery pipeline, and emits top-k feedback records. All of this is local and
+replaceable; real crystal toolkits, MLIP, DFT, Materials Project, CSLLM, and
+training code remain outside the current implementation.
+
 ## Development
 
 Install in editable mode with test dependencies:

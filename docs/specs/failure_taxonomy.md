@@ -183,3 +183,14 @@ Failure Taxonomy 提供闭环的第 2 步：
 - F3 不可用时不会触发外部 API 或真实 MLIP/DFT。
 - 同一 `FailureLabel` 可直接被 `fsal_algorithm.md` 的 `PreferencePair` 引用。
 - 规格支持 mock/test scorer，因此不依赖大型数据集或外部服务。
+
+## 当前 Lightweight 实现说明
+
+当前代码已实现一个不依赖 pymatgen/ASE/MLIP/DFT 的轻量闭环：
+
+- `StructureLike` / `CrystalRecord` 支持 `candidate_id`、composition、atom count、space group、prototype、lattice lengths、lattice angles、fractional coordinates 和 mock scores。
+- `GeometryFailureLabeler` 实现 F1：最小 mock 原子距离、晶格长度、晶格角度、缺失坐标/晶格和空结构 hard constraints。
+- `ChemistryFailureLabeler` 实现 F2：空 composition、composition 字符串解析、metadata/mock chemistry score，并预留 chemistry rule protocol。
+- `StabilityFailureLabeler` 实现 F3：从 metadata/mock stability score 读取占位稳定性分数，并预留 future stability adapter。
+- `FailureOracle` 组合 F1/F2/F3，输出 `FailureVector`，包含 confidence、calibration tier、`is_valid`、`hard_failures` 和 metadata。
+- 当前实际 tier 逻辑为：tier 0 invalid/hard failure，tier 1 mock-only，tier 2 rule-based。tier 3 ensemble/calibrated 和 tier 4 DFT-calibrated 仅保留为未来占位。

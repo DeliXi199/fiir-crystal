@@ -199,3 +199,14 @@ FSAL 覆盖闭环第 3 和第 4 步：
 - 所有阈值和 tier weight 可配置、可记录。
 - Trainer 接口不触发真实深度学习训练。
 - 无外部 API、无数据集下载、无 MLIP/DFT 调用。
+
+## 当前 Lightweight 实现说明
+
+当前 `AxisAlignedPairMiner` 已实现轻量 matched axis-aligned preference dataset 构造：
+
+- 输入 `LabeledCandidate`，可同时携带 `FailureLabel` 和 `FailureVector`。
+- 支持 F1/F2/F3 三个 axis 的 pair mining。
+- 支持 prototype match、num_atoms tolerance、可选 space group match、可选 composition family match。
+- pair 输出 winner、loser、axis、margin、confidence、`match_metadata`、reason 和 failure summaries。
+- pair confidence 综合 winner/loser failure confidence、main-axis margin 和结构匹配程度。
+- 当前仍不实现 DPO/LoRA/adapter 训练；`FSALTrainer` 仍是可替换接口。
