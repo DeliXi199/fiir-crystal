@@ -194,3 +194,4 @@ Failure Taxonomy 提供闭环的第 2 步：
 - `StabilityFailureLabeler` 实现 F3：从 metadata/mock stability score 读取占位稳定性分数，并预留 future stability adapter。
 - `FailureOracle` 组合 F1/F2/F3，输出 `FailureVector`，包含 confidence、calibration tier、`is_valid`、`hard_failures` 和 metadata。
 - 当前实际 tier 逻辑为：tier 0 invalid/hard failure，tier 1 mock-only，tier 2 rule-based。tier 3 ensemble/calibrated 和 tier 4 DFT-calibrated 仅保留为未来占位。
+- `fiir_crystal.io` 支持 `StructureLike` 和 `FailureVector` 的 JSONL round-trip，用于可复现实验输入和中间结果导出。

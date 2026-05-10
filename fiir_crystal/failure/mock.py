@@ -77,9 +77,67 @@ class StructureLike:
             },
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the lightweight structure to a JSON-compatible dict."""
+
+        return {
+            "candidate_id": self.candidate_id,
+            "composition": self.composition,
+            "num_atoms": self.num_atoms,
+            "space_group": self.space_group,
+            "prototype": self.prototype,
+            "mock_geometry_score": self.mock_geometry_score,
+            "mock_chemistry_score": self.mock_chemistry_score,
+            "mock_stability_score": self.mock_stability_score,
+            "lattice_lengths": list(self.lattice_lengths) if self.lattice_lengths is not None else None,
+            "lattice_angles": list(self.lattice_angles) if self.lattice_angles is not None else None,
+            "frac_coords": [list(coord) for coord in self.frac_coords] if self.frac_coords is not None else None,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "StructureLike":
+        """Deserialize a `StructureLike` from a JSON-compatible dict."""
+
+        candidate_id = data.get("candidate_id", data.get("sample_id"))
+        if not candidate_id:
+            raise ValueError("StructureLike requires candidate_id.")
+        return cls(
+            candidate_id=str(candidate_id),
+            composition=str(data.get("composition", "")),
+            num_atoms=int(data.get("num_atoms", 0)),
+            space_group=data.get("space_group"),
+            prototype=data.get("prototype"),
+            mock_geometry_score=float(data.get("mock_geometry_score", data.get("metadata", {}).get("mock_geometry_score", 0.0))),
+            mock_chemistry_score=float(data.get("mock_chemistry_score", data.get("metadata", {}).get("mock_chemistry_score", 0.0))),
+            mock_stability_score=(
+                None
+                if data.get("mock_stability_score", data.get("metadata", {}).get("mock_stability_score")) is None
+                else float(data.get("mock_stability_score", data.get("metadata", {}).get("mock_stability_score")))
+            ),
+            lattice_lengths=_tuple3_or_none(data.get("lattice_lengths")),
+            lattice_angles=_tuple3_or_none(data.get("lattice_angles")),
+            frac_coords=_coords_or_none(data.get("frac_coords")),
+            metadata=dict(data.get("metadata", {})),
+        )
+
 
 class CrystalRecord(StructureLike):
     """Backward-compatible name for the lightweight mock structure record."""
+
+
+def _tuple3_or_none(value: Any) -> tuple[float, float, float] | None:
+    if value is None:
+        return None
+    if len(value) != 3:
+        raise ValueError("Expected a length-3 numeric sequence.")
+    return (float(value[0]), float(value[1]), float(value[2]))
+
+
+def _coords_or_none(value: Any) -> tuple[tuple[float, float, float], ...] | None:
+    if value is None:
+        return None
+    return tuple(_tuple3_or_none(coord) for coord in value)
 
 
 def _severity_for_unit_interval(value: float | None) -> FailureSeverity:

@@ -212,3 +212,5 @@ Discovery 使用前面模块的结果形成闭环末端：
 - `MockRanker` 使用 utility-style ranking，考虑 lower F1/F2/F3、higher confidence、validity、novelty placeholder、diversity placeholder 和简单 cost。
 - `MockValidationAdapter` 只生成 validation task metadata，不运行外部验证。
 - `MockFeedbackSink` 输出 top-k feedback records，包含 candidate id、selected rank、failure vector、decision、reason 和 metadata。
+- `MockRanker` 当前支持 `utility` 和轻量 `pareto` ranking mode。
+- `scripts/run_fiir_experiment.py` 读取配置与 JSONL 输入，输出 candidates、failure vectors、preference pairs、evaluation report、discovery ranking、feedback records、experiment summary 和 Markdown report。

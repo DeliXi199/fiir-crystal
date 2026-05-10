@@ -131,6 +131,45 @@ class FailureVector:
             return None
         return self.f3_stability < 0.1
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the failure vector to a JSON-compatible dict."""
+
+        return {
+            "sample_id": self.sample_id,
+            "candidate_id": self.candidate_id,
+            "structure_ref": self.structure_ref,
+            "f1_geometry": self.f1_geometry,
+            "f2_chemistry": self.f2_chemistry,
+            "f3_stability": self.f3_stability,
+            "confidence": self.confidence,
+            "uncertainty": self.uncertainty,
+            "calibration_tier": self.calibration_tier,
+            "is_valid": self.is_valid,
+            "hard_failures": list(self.hard_failures),
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FailureVector":
+        """Deserialize a failure vector from a JSON-compatible dict."""
+
+        sample_id = data.get("sample_id", data.get("candidate_id"))
+        if not sample_id:
+            raise ValueError("FailureVector requires sample_id or candidate_id.")
+        return cls(
+            sample_id=str(sample_id),
+            structure_ref=data.get("structure_ref"),
+            f1_geometry=float(data["f1_geometry"]),
+            f2_chemistry=float(data["f2_chemistry"]),
+            f3_stability=None if data.get("f3_stability") is None else float(data["f3_stability"]),
+            confidence=float(data.get("confidence", 0.0)),
+            uncertainty=float(data.get("uncertainty", 0.0)),
+            calibration_tier=int(data.get("calibration_tier", 0)),
+            is_valid=bool(data.get("is_valid", True)),
+            hard_failures=list(data.get("hard_failures", [])),
+            metadata=dict(data.get("metadata", {})),
+        )
+
 
 @dataclass(slots=True)
 class FailureLabel:

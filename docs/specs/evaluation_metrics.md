@@ -164,3 +164,16 @@ Novelty 和 uniqueness 的匹配容差必须写入 `MetricReport.config`。默�
 - Metric report 可序列化，并包含阈值和匹配容差。
 - 评估不触发训练、MLIP、DFT、外部 API 或数据下载。
 - 指标足以支撑 FSAL 消融：binary vs weighted-sum vs axis-aligned、standard DPO vs CW-Margin、matched vs score-aligned、on-policy vs off-policy。
+
+## 当前 Lightweight 实现说明
+
+当前 `EvaluationReport` 已覆盖可配置 mock 实验需要的核心指标：
+
+- candidate count、valid rate、failure rate、hard failure count；
+- average/max F1/F2/F3；
+- calibration tier distribution；
+- pair count、pairs by axis、pairs by mode；
+- average pair margin、average pair confidence、valid pair ratio；
+- top-k average failure、top-k valid rate、ranking utility stats。
+
+报告支持 JSON 输出，并被 experiment runner 和 Markdown report generator 复用。

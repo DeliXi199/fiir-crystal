@@ -210,3 +210,5 @@ FSAL 覆盖闭环第 3 和第 4 步：
 - pair 输出 winner、loser、axis、margin、confidence、`match_metadata`、reason 和 failure summaries。
 - pair confidence 综合 winner/loser failure confidence、main-axis margin 和结构匹配程度。
 - 当前仍不实现 DPO/LoRA/adapter 训练；`FSALTrainer` 仍是可替换接口。
+- `build_preference_dataset` 统一支持 `axis_aligned`、`weighted_sum`、`random_negative` 和 `binary_success_failure` 四种 pair construction mode，全部输出 `PreferencePair`，并记录 mode、reason、margin、confidence、match constraints 和 score details。
+- `random_negative` 使用配置 seed 保证可复现；`weighted_sum` 支持 F1/F2/F3 权重配置。

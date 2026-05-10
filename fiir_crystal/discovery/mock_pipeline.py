@@ -68,9 +68,27 @@ class MockScreeningAdapter(ScreeningAdapter):
 class MockRanker(Ranker):
     """Utility-style ranking over failure, confidence, validity, novelty, and diversity."""
 
+    def __init__(
+        self,
+        mode: str = "utility",
+        weights: dict[str, float] | None = None,
+        allow_invalid: bool = False,
+    ) -> None:
+        self.mode = mode
+        self.weights = weights or {
+            "success": 0.4,
+            "confidence": 0.2,
+            "validity": 0.15,
+            "novelty": 0.15,
+            "diversity": 0.1,
+            "cost": 0.05,
+        }
+        self.allow_invalid = allow_invalid
+
     def rank(self, candidates: Sequence[DiscoveryCandidate]) -> list[RankedCandidate]:
+        candidates_to_rank = list(candidates if self.allow_invalid else [candidate for candidate in candidates if (_vector(candidate) and _vector(candidate).is_valid)])
         ranked: list[RankedCandidate] = []
-        for candidate in candidates:
+        for candidate in candidates_to_rank:
             vector = _vector(candidate)
             failure = _normalized_failure(candidate)
             success = max(0.0, 1.0 - failure)
@@ -79,14 +97,7 @@ class MockRanker(Ranker):
             novelty = float(candidate.metadata.get("mock_novelty", 0.5))
             diversity = float(candidate.metadata.get("mock_diversity", 0.5))
             cost = float(candidate.metadata.get("num_atoms", 10)) / 100.0
-            utility = (
-                0.4 * success
-                + 0.2 * confidence
-                + 0.15 * validity
-                + 0.15 * novelty
-                + 0.1 * diversity
-                - 0.05 * cost
-            )
+            utility = self._utility(success, confidence, validity, novelty, diversity, cost)
             ranked.append(
                 RankedCandidate(
                     candidate_id=candidate.candidate_id,
@@ -103,7 +114,7 @@ class MockRanker(Ranker):
                     ),
                     pareto_layer=0,
                     rank=0,
-                    selection_reason="mock_fiir_utility",
+                    selection_reason=f"mock_fiir_{self.mode}",
                     objectives={
                         "success": success,
                         "confidence": confidence,
@@ -115,10 +126,56 @@ class MockRanker(Ranker):
                 )
             )
 
-        ranked.sort(key=lambda item: item.acquisition.utility, reverse=True)
+        if self.mode == "pareto":
+            ranked = self._pareto_rank(ranked)
+        else:
+            ranked.sort(key=lambda item: item.acquisition.utility, reverse=True)
         for index, item in enumerate(ranked, start=1):
             item.rank = index
         return ranked
+
+    def _utility(
+        self,
+        success: float,
+        confidence: float,
+        validity: float,
+        novelty: float,
+        diversity: float,
+        cost: float,
+    ) -> float:
+        return (
+            self.weights.get("success", 0.4) * success
+            + self.weights.get("confidence", 0.2) * confidence
+            + self.weights.get("validity", 0.15) * validity
+            + self.weights.get("novelty", 0.15) * novelty
+            + self.weights.get("diversity", 0.1) * diversity
+            - self.weights.get("cost", 0.05) * cost
+        )
+
+    def _pareto_rank(self, ranked: list[RankedCandidate]) -> list[RankedCandidate]:
+        remaining = list(ranked)
+        layered: list[RankedCandidate] = []
+        layer = 0
+        while remaining:
+            front: list[RankedCandidate] = []
+            for candidate in remaining:
+                if not any(self._dominates(other, candidate) for other in remaining if other is not candidate):
+                    front.append(candidate)
+            for candidate in front:
+                candidate.pareto_layer = layer
+            front.sort(key=lambda item: item.acquisition.utility, reverse=True)
+            layered.extend(front)
+            remaining = [candidate for candidate in remaining if candidate not in front]
+            layer += 1
+        return layered
+
+    def _dominates(self, left: RankedCandidate, right: RankedCandidate) -> bool:
+        objective_keys = ["success", "confidence", "validity", "novelty", "diversity"]
+        ge_all = all(left.objectives.get(key, 0.0) >= right.objectives.get(key, 0.0) for key in objective_keys)
+        gt_any = any(left.objectives.get(key, 0.0) > right.objectives.get(key, 0.0) for key in objective_keys)
+        cost_le = left.objectives.get("cost", 1.0) <= right.objectives.get("cost", 1.0)
+        cost_lt = left.objectives.get("cost", 1.0) < right.objectives.get("cost", 1.0)
+        return ge_all and cost_le and (gt_any or cost_lt)
 
 
 class MockValidationAdapter(ValidationAdapter):
@@ -177,13 +234,17 @@ class MockDiscoveryPipeline(DiscoveryPipeline):
         validator: ValidationAdapter | None = None,
         feedback_sink: FeedbackSink | None = None,
         top_k: int = 3,
+        ranking_mode: str = "utility",
+        ranking_weights: dict[str, float] | None = None,
+        allow_invalid: bool = False,
     ) -> None:
         self.oracle = oracle or FailureOracle.default()
         self.screener = screener or MockScreeningAdapter()
-        self.ranker = ranker or MockRanker()
+        self.ranker = ranker or MockRanker(mode=ranking_mode, weights=ranking_weights, allow_invalid=allow_invalid)
         self.validator = validator or MockValidationAdapter(top_k=top_k)
         self.feedback_sink = feedback_sink or MockFeedbackSink()
         self.top_k = top_k
+        self.ranking_mode = ranking_mode
 
     def run_structures(self, structures: Sequence[StructureLike]) -> DiscoveryRun:
         """Run the mock pipeline directly from lightweight structures."""
@@ -225,6 +286,7 @@ class MockDiscoveryPipeline(DiscoveryPipeline):
                     "failure_vector": candidate_index[task.candidate_id].failure_vector,
                     "decision": "selected",
                     "reason": "top_k_mock_ranking",
+                    "ranking_mode": self.ranking_mode,
                     "utility": rank_index[task.candidate_id].acquisition.utility,
                 },
             )
@@ -242,6 +304,7 @@ class MockDiscoveryPipeline(DiscoveryPipeline):
                 "input_count": len(prepared),
                 "screened_count": len(screened),
                 "top_k": self.top_k,
+                "ranking_mode": self.ranking_mode,
             },
         )
 

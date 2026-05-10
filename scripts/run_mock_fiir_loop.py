@@ -11,37 +11,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from fiir_crystal.discovery import MockDiscoveryPipeline
 from fiir_crystal.evaluation import evaluate_mock_fiir_loop
+from fiir_crystal.experiment import build_labeled_candidates
 from fiir_crystal.failure import FailureOracle, StructureLike, demo_mock_crystals
-from fiir_crystal.fsal import AxisAlignedPairMiner, LabeledCandidate, MatchedPairConfig
-
-
-def build_labeled_candidates(
-    oracle: FailureOracle,
-    structures: list[StructureLike],
-) -> list[LabeledCandidate]:
-    """Build FSAL candidates from lightweight structures and oracle outputs."""
-
-    candidates: list[LabeledCandidate] = []
-    for structure in structures:
-        vector = oracle.vectorize(structure)
-        label = oracle.label_structure(structure)
-        candidates.append(
-            LabeledCandidate(
-                sample_id=structure.sample_id,
-                structure_ref=structure.structure_ref,
-                failure_label=label,
-                failure_vector=vector,
-                chemical_bucket=structure.chemical_bucket,
-                atom_count=structure.num_atoms,
-                space_group=structure.space_group,
-                prototype=structure.prototype,
-                metadata={
-                    "composition": structure.composition,
-                    "composition_family": structure.prototype or structure.composition,
-                },
-            )
-        )
-    return candidates
+from fiir_crystal.fsal import AxisAlignedPairMiner, MatchedPairConfig
 
 
 def main() -> None:
