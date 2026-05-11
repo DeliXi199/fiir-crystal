@@ -43,7 +43,10 @@ def build_labeled_candidates(
     return candidates
 
 
-def run_fiir_experiment(config: ExperimentConfig) -> dict[str, Any]:
+def run_fiir_experiment(
+    config: ExperimentConfig,
+    validation_results: Sequence[Any] | None = None,
+) -> dict[str, Any]:
     """Run the full lightweight FIIR experiment and write configured outputs."""
 
     output_dir = Path(config.output_dir)
@@ -78,8 +81,17 @@ def run_fiir_experiment(config: ExperimentConfig) -> dict[str, Any]:
         ranked_candidates=discovery_run.ranked_candidates,
         top_k=config.top_k,
         failure_threshold=config.failure_thresholds.get("f3", 0.1),
+        validation_results=validation_results,
     )
-    summary = _summary(config, structures, vectors, preference_dataset.pairs, discovery_run.ranked_candidates, discovery_run.feedback_records)
+    summary = _summary(
+        config,
+        structures,
+        vectors,
+        preference_dataset.pairs,
+        discovery_run.ranked_candidates,
+        discovery_run.feedback_records,
+        validation_results,
+    )
 
     if config.output_options.get("write_intermediates", True):
         write_jsonl(output_dir / "candidates.jsonl", structures)
@@ -88,6 +100,8 @@ def run_fiir_experiment(config: ExperimentConfig) -> dict[str, Any]:
         write_json(output_dir / "evaluation_report.json", evaluation_report)
         write_jsonl(output_dir / "discovery_ranking.jsonl", discovery_run.ranked_candidates)
         write_jsonl(output_dir / "feedback_records.jsonl", discovery_run.feedback_records)
+        if validation_results is not None:
+            write_jsonl(output_dir / "validation_results.jsonl", validation_results)
         write_json(output_dir / "experiment_summary.json", summary)
 
     if config.output_options.get("write_report", True):
@@ -108,6 +122,7 @@ def run_fiir_experiment(config: ExperimentConfig) -> dict[str, Any]:
         "preference_dataset": preference_dataset,
         "evaluation_report": evaluation_report,
         "discovery_run": discovery_run,
+        "validation_results": list(validation_results) if validation_results is not None else None,
         "summary": summary,
         "output_dir": output_dir,
     }
@@ -135,6 +150,7 @@ def _summary(
     pairs: Sequence[Any],
     ranked: Sequence[Any],
     feedback: Sequence[Any],
+    validation_results: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "input_path": config.input_path,
@@ -146,5 +162,6 @@ def _summary(
         "pair_count": len(pairs),
         "ranked_count": len(ranked),
         "feedback_count": len(feedback),
+        "validation_count": len(validation_results) if validation_results is not None else 0,
         "top_k": config.top_k,
     }

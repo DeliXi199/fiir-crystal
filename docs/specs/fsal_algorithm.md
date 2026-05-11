@@ -212,3 +212,20 @@ FSAL 覆盖闭环第 3 和第 4 步：
 - 当前仍不实现 DPO/LoRA/adapter 训练；`FSALTrainer` 仍是可替换接口。
 - `build_preference_dataset` 统一支持 `axis_aligned`、`weighted_sum`、`random_negative` 和 `binary_success_failure` 四种 pair construction mode，全部输出 `PreferencePair`，并记录 mode、reason、margin、confidence、match constraints 和 score details。
 - `random_negative` 使用配置 seed 保证可复现；`weighted_sum` 支持 F1/F2/F3 权重配置。
+
+## 当前 Pair Mode 对比实现
+
+`fiir_crystal.comparison.compare_pair_modes` 用同一份 mock candidates 和配置自动运行多种 pair construction modes。每个 mode 都调用标准 experiment runner，并写入独立输出目录：
+
+- `axis_aligned/`
+- `weighted_sum/`
+- `random_negative/`
+- `binary_success_failure/`
+
+对比摘要写出：
+
+- `comparison_summary.json`
+- `comparison_table.md`
+- `report.md`
+
+对比表字段包括 candidate count、valid/failure rate、pair count、pairs by axis/mode、average margin/confidence、valid pair ratio、top-k failure/validity 和 ranking utility 统计。若提供离线 validation JSONL，还会加入 validated stable rate、top-k validated stable rate、validation coverage 和 validation failure count。

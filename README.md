@@ -25,6 +25,10 @@ Implemented today:
 - Mock discovery ranking with `utility` and lightweight `pareto` modes.
 - JSONL/JSON I/O for candidates, failure vectors, pairs, reports, ranking, feedback, and summaries.
 - Configurable experiment runner and Markdown report generation.
+- Pair mode comparison across `axis_aligned`, `weighted_sum`, `random_negative`, and `binary_success_failure`.
+- Multi-run experiment aggregation from existing output directories.
+- Offline validation result JSONL import and validation-aware metrics.
+- Mock feedback buffer and multi-round active discovery loop simulation.
 
 ## Install
 
@@ -61,6 +65,45 @@ python scripts/run_fiir_experiment.py \
   --top-k 5
 ```
 
+Optional offline validation import:
+
+```bash
+python scripts/run_fiir_experiment.py \
+  --config configs/mock_fiir_loop.yaml \
+  --validation examples/mock_validation_results.jsonl
+```
+
+## Compare Pair Modes
+
+```bash
+python scripts/compare_pair_modes.py --config configs/mock_fiir_loop.yaml
+```
+
+With offline validation metrics:
+
+```bash
+python scripts/compare_pair_modes.py \
+  --config configs/mock_fiir_loop.yaml \
+  --validation examples/mock_validation_results.jsonl
+```
+
+## Aggregate Existing Runs
+
+```bash
+python scripts/compare_experiments.py \
+  --runs outputs/pair_mode_comparison/axis_aligned outputs/pair_mode_comparison/weighted_sum \
+  --output-dir outputs/aggregate_report
+```
+
+## Run A Mock Active Loop
+
+```bash
+python scripts/run_mock_active_loop.py \
+  --config configs/mock_fiir_loop.yaml \
+  --validation examples/mock_validation_results.jsonl \
+  --rounds 2
+```
+
 ## Output Files
 
 The configured runner writes:
@@ -74,6 +117,16 @@ The configured runner writes:
 - `experiment_summary.json`
 - `report.md`
 
+Pair mode comparison writes `comparison_summary.json`, `comparison_table.md`,
+and `report.md`, plus one full experiment output directory per mode.
+
+Aggregate comparison writes `aggregate_summary.json`, `aggregate_table.md`, and
+`report.md`.
+
+Mock active loop writes `round_001/`, `round_002/`, ... experiment directories,
+plus `feedback_buffer.jsonl`, `active_loop_state.json`,
+`active_loop_summary.json`, and `active_loop_report.md`.
+
 ## Package Layout
 
 - `fiir_crystal.failure`: F1/F2/F3 vectors, lightweight labelers, oracle, and data models.
@@ -83,6 +136,9 @@ The configured runner writes:
 - `fiir_crystal.io`: JSON/JSONL helpers.
 - `fiir_crystal.config`: lightweight config loader.
 - `fiir_crystal.reporting`: Markdown report generator.
+- `fiir_crystal.validation`: offline validation result records and joins.
+- `fiir_crystal.comparison`: pair mode comparison and run aggregation.
+- `fiir_crystal.feedback`: feedback buffer and mock active loop simulation.
 
 ## Current Limitations
 
@@ -90,10 +146,11 @@ The configured runner writes:
 - F2 chemistry and F3 stability are lightweight placeholders.
 - No MLIP, DFT, database novelty, synthesizability model, or real training is run.
 - Pareto ranking is intentionally small and deterministic.
+- Active loop rounds reuse mock candidates with metadata hints; no generator is trained.
 
 ## Next Steps
 
 - Add optional local adapters for real structure objects.
-- Add JSONL import for offline validation results.
 - Keep FSAL trainer as an adapter boundary until real training is explicitly needed.
-- Expand reports with comparison tables across pair modes.
+- Add richer local validation adapters only when results are already available offline.
+- Add config hashes and seed sweeps for larger reproducibility studies.

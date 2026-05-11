@@ -175,5 +175,11 @@ Novelty 和 uniqueness 的匹配容差必须写入 `MetricReport.config`。默�
 - pair count、pairs by axis、pairs by mode；
 - average pair margin、average pair confidence、valid pair ratio；
 - top-k average failure、top-k valid rate、ranking utility stats。
+- validation metrics availability、validation count、validation success rate；
+- validated stable count/rate、average validated `e_above_hull`；
+- validated novel count/rate、validation failure count；
+- top-k validated stable rate、top-k validation coverage。
 
 报告支持 JSON 输出，并被 experiment runner 和 Markdown report generator 复用。
+
+如果未提供 offline validation results，validation-aware metrics 会显式标记为 unavailable；评估不会报错，也不会隐式调用任何外部验证能力。

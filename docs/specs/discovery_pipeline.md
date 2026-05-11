@@ -214,3 +214,23 @@ Discovery 使用前面模块的结果形成闭环末端：
 - `MockFeedbackSink` 输出 top-k feedback records，包含 candidate id、selected rank、failure vector、decision、reason 和 metadata。
 - `MockRanker` 当前支持 `utility` 和轻量 `pareto` ranking mode。
 - `scripts/run_fiir_experiment.py` 读取配置与 JSONL 输入，输出 candidates、failure vectors、preference pairs、evaluation report、discovery ranking、feedback records、experiment summary 和 Markdown report。
+
+## 当前 Offline Validation 与 Active Loop 实现
+
+新增 `fiir_crystal.validation.ValidationResult` 用于导入本地 JSONL 验证结果。字段覆盖 validation source、status、validated、stable verdict、`e_above_hull`、band gap、relaxed、novelty label、synthesizability score、error message 和 metadata。导入逻辑只读文件，不运行 MLIP、DFT、Materials Project、CSLLM 或外部服务。
+
+`fiir_crystal.feedback.FeedbackBuffer` 将 discovery feedback 和 offline validation results 转为 `FeedbackEvent`：
+
+- stable validation -> `positive_evidence`；
+- unstable 或 failed validation -> `negative_evidence`；
+- pending/unknown validation -> `pending_evidence`。
+
+`scripts/run_mock_active_loop.py` 实现 mock 多轮闭环：
+
+1. Round 1 读取 JSONL candidates，运行完整 FIIR experiment。
+2. 如果提供 validation JSONL，则导入结果并更新 feedback buffer。
+3. 后续 round 不生成真实新结构，只根据 feedback buffer 对已有 mock candidates 的 metadata 进行确定性重采样/排序提示。
+4. 每轮仍产出标准 experiment output directory。
+5. 总输出包括 `feedback_buffer.jsonl`、`active_loop_state.json`、`active_loop_summary.json` 和 `active_loop_report.md`。
+
+该 active loop 是工程数据流模拟，不代表真实主动学习训练。

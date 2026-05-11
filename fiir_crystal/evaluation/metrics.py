@@ -89,6 +89,17 @@ class EvaluationReport:
     top_k_average_failure: float | None = None
     top_k_valid_rate: float | None = None
     ranking_utility_stats: dict[str, float] = field(default_factory=dict)
+    validation_metrics_available: bool = False
+    validation_count: int = 0
+    validation_success_rate: float | None = None
+    validated_stable_count: int = 0
+    validated_stable_rate: float | None = None
+    average_validated_e_above_hull: float | None = None
+    validated_novel_count: int = 0
+    validated_novel_rate: float | None = None
+    validation_failure_count: int = 0
+    top_k_validated_stable_rate: float | None = None
+    top_k_validation_coverage: float | None = None
     candidate_count: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -115,6 +126,17 @@ class EvaluationReport:
             "top_k_average_failure": self.top_k_average_failure,
             "top_k_valid_rate": self.top_k_valid_rate,
             "ranking_utility_stats": dict(self.ranking_utility_stats),
+            "validation_metrics_available": self.validation_metrics_available,
+            "validation_count": self.validation_count,
+            "validation_success_rate": self.validation_success_rate,
+            "validated_stable_count": self.validated_stable_count,
+            "validated_stable_rate": self.validated_stable_rate,
+            "average_validated_e_above_hull": self.average_validated_e_above_hull,
+            "validated_novel_count": self.validated_novel_count,
+            "validated_novel_rate": self.validated_novel_rate,
+            "validation_failure_count": self.validation_failure_count,
+            "top_k_validated_stable_rate": self.top_k_validated_stable_rate,
+            "top_k_validation_coverage": self.top_k_validation_coverage,
             "candidate_count": self.candidate_count,
             "metadata": dict(self.metadata),
         }
@@ -156,6 +178,35 @@ class EvaluationReport:
                 str(key): float(value)
                 for key, value in dict(data.get("ranking_utility_stats", {})).items()
             },
+            validation_metrics_available=bool(data.get("validation_metrics_available", False)),
+            validation_count=int(data.get("validation_count", 0)),
+            validation_success_rate=(
+                None if data.get("validation_success_rate") is None else float(data["validation_success_rate"])
+            ),
+            validated_stable_count=int(data.get("validated_stable_count", 0)),
+            validated_stable_rate=(
+                None if data.get("validated_stable_rate") is None else float(data["validated_stable_rate"])
+            ),
+            average_validated_e_above_hull=(
+                None
+                if data.get("average_validated_e_above_hull") is None
+                else float(data["average_validated_e_above_hull"])
+            ),
+            validated_novel_count=int(data.get("validated_novel_count", 0)),
+            validated_novel_rate=(
+                None if data.get("validated_novel_rate") is None else float(data["validated_novel_rate"])
+            ),
+            validation_failure_count=int(data.get("validation_failure_count", 0)),
+            top_k_validated_stable_rate=(
+                None
+                if data.get("top_k_validated_stable_rate") is None
+                else float(data["top_k_validated_stable_rate"])
+            ),
+            top_k_validation_coverage=(
+                None
+                if data.get("top_k_validation_coverage") is None
+                else float(data["top_k_validation_coverage"])
+            ),
             candidate_count=int(data.get("candidate_count", 0)),
             metadata=dict(data.get("metadata", {})),
         )
@@ -170,6 +221,7 @@ def evaluate_mock_fiir_loop(
     ranked_candidates: Sequence[Any] | None = None,
     top_k: int | None = None,
     failure_threshold: float = 0.1,
+    validation_results: Sequence[Any] | None = None,
 ) -> EvaluationReport:
     """Compute minimal metrics for the mock FIIR data flow."""
 
@@ -219,6 +271,11 @@ def evaluate_mock_fiir_loop(
         ranked_candidates or [],
         top_k=top_k,
     )
+    validation_metrics = _validation_metrics(
+        validation_results=validation_results,
+        ranked_candidates=ranked_candidates or [],
+        top_k=top_k,
+    )
 
     return EvaluationReport(
         average_f1=sum(f1_values) / label_count if label_count else 0.0,
@@ -240,8 +297,22 @@ def evaluate_mock_fiir_loop(
         top_k_average_failure=top_k_average_failure,
         top_k_valid_rate=top_k_valid_rate,
         ranking_utility_stats=utility_stats,
+        validation_metrics_available=validation_metrics["validation_metrics_available"],
+        validation_count=validation_metrics["validation_count"],
+        validation_success_rate=validation_metrics["validation_success_rate"],
+        validated_stable_count=validation_metrics["validated_stable_count"],
+        validated_stable_rate=validation_metrics["validated_stable_rate"],
+        average_validated_e_above_hull=validation_metrics["average_validated_e_above_hull"],
+        validated_novel_count=validation_metrics["validated_novel_count"],
+        validated_novel_rate=validation_metrics["validated_novel_rate"],
+        validation_failure_count=validation_metrics["validation_failure_count"],
+        top_k_validated_stable_rate=validation_metrics["top_k_validated_stable_rate"],
+        top_k_validation_coverage=validation_metrics["top_k_validation_coverage"],
         candidate_count=label_count,
-        metadata={"failure_threshold": failure_threshold},
+        metadata={
+            "failure_threshold": failure_threshold,
+            "validation_metrics": "available" if validation_results is not None else "unavailable",
+        },
     )
 
 
@@ -272,6 +343,77 @@ def _ranking_metrics(
             "mean": sum(utilities) / len(utilities),
         },
     )
+
+
+def _validation_metrics(
+    validation_results: Sequence[Any] | None,
+    ranked_candidates: Sequence[Any],
+    top_k: int | None,
+) -> dict[str, Any]:
+    unavailable = {
+        "validation_metrics_available": False,
+        "validation_count": 0,
+        "validation_success_rate": None,
+        "validated_stable_count": 0,
+        "validated_stable_rate": None,
+        "average_validated_e_above_hull": None,
+        "validated_novel_count": 0,
+        "validated_novel_rate": None,
+        "validation_failure_count": 0,
+        "top_k_validated_stable_rate": None,
+        "top_k_validation_coverage": None,
+    }
+    if validation_results is None:
+        return unavailable
+
+    results = list(validation_results)
+    count = len(results)
+    succeeded = [result for result in results if _validation_succeeded(result)]
+    failed = [result for result in results if _validation_failed(result)]
+    stable = [result for result in succeeded if getattr(result, "is_stable", None) is True]
+    novel = [result for result in succeeded if _novelty_passed(result)]
+    e_values = [
+        float(getattr(result, "e_above_hull"))
+        for result in succeeded
+        if getattr(result, "e_above_hull", None) is not None
+    ]
+    top_ids = [str(getattr(candidate, "candidate_id", "")) for candidate in list(ranked_candidates)[: top_k or len(ranked_candidates)]]
+    validation_index = {str(getattr(result, "candidate_id", "")): result for result in results}
+    top_results = [validation_index[candidate_id] for candidate_id in top_ids if candidate_id in validation_index]
+    top_succeeded = [result for result in top_results if _validation_succeeded(result)]
+    top_stable = [result for result in top_succeeded if getattr(result, "is_stable", None) is True]
+    return {
+        "validation_metrics_available": True,
+        "validation_count": count,
+        "validation_success_rate": (len(succeeded) / count) if count else 0.0,
+        "validated_stable_count": len(stable),
+        "validated_stable_rate": (len(stable) / len(succeeded)) if succeeded else None,
+        "average_validated_e_above_hull": (sum(e_values) / len(e_values)) if e_values else None,
+        "validated_novel_count": len(novel),
+        "validated_novel_rate": (len(novel) / len(succeeded)) if succeeded else None,
+        "validation_failure_count": len(failed),
+        "top_k_validated_stable_rate": (len(top_stable) / len(top_succeeded)) if top_succeeded else None,
+        "top_k_validation_coverage": (len(top_results) / len(top_ids)) if top_ids else None,
+    }
+
+
+def _validation_succeeded(result: Any) -> bool:
+    if hasattr(result, "succeeded"):
+        return bool(result.succeeded)
+    status = str(getattr(result, "status", "")).lower()
+    return bool(getattr(result, "validated", False)) and status not in {"failed", "error"} and not getattr(result, "error_message", None)
+
+
+def _validation_failed(result: Any) -> bool:
+    status = str(getattr(result, "status", "")).lower()
+    return status in {"failed", "error"} or bool(getattr(result, "error_message", None))
+
+
+def _novelty_passed(result: Any) -> bool:
+    if hasattr(result, "novelty_passed"):
+        return bool(result.novelty_passed)
+    label = getattr(result, "novelty_label", None)
+    return False if label is None else str(label).lower() in {"novel", "pass", "passed", "new", "true"}
 
 
 class FailureMetricComputer(ABC):

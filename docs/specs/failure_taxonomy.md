@@ -195,3 +195,5 @@ Failure Taxonomy 提供闭环的第 2 步：
 - `FailureOracle` 组合 F1/F2/F3，输出 `FailureVector`，包含 confidence、calibration tier、`is_valid`、`hard_failures` 和 metadata。
 - 当前实际 tier 逻辑为：tier 0 invalid/hard failure，tier 1 mock-only，tier 2 rule-based。tier 3 ensemble/calibrated 和 tier 4 DFT-calibrated 仅保留为未来占位。
 - `fiir_crystal.io` 支持 `StructureLike` 和 `FailureVector` 的 JSONL round-trip，用于可复现实验输入和中间结果导出。
+- `fiir_crystal.validation.ValidationResult` 可以离线导入未来 MLIP/DFT/人工验证结果，并通过 `candidate_id` 与 `FailureVector`、ranking 和 feedback 记录 join。
+- `fiir_crystal.feedback.FeedbackBuffer` 只消费已有 failure vector、discovery feedback 和离线 validation result；它不重新标注结构，也不训练 predictor 或 generator。
