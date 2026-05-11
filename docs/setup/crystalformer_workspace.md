@@ -20,6 +20,33 @@ fiir-crystal/
 `external/checkpoints/` is for local model checkpoints. `outputs/` directories
 are local run artifacts. Checkpoints and outputs are not committed to git.
 
+## Recommended Phase A Workflow
+
+This phase is the real-smoke integration layer, not DPO training:
+
+1. Check the external workspace.
+2. Run CrystalFormer externally, or point FIIR at already existing raw outputs.
+3. Run the FIIR smoke pipeline.
+4. Inspect the audit artifacts.
+5. Inspect the DPO preference artifact.
+
+Future real training belongs to a later phase: a CrystalFormer fork/submodule,
+a trainer adapter boundary, and DPO loss integration inside that external
+workspace. FIIR Crystal core remains standard-library only.
+
+## Readiness Check
+
+Run this from the FIIR Crystal repository root:
+
+```bash
+python scripts/check_crystalformer_workspace.py --output-dir outputs/workspace_check
+```
+
+The check is local-only. It reports whether `external/CrystalFormer` is missing,
+a normal clone, or submodule-like; whether `external/checkpoints` exists; and
+whether the local output directories exist. It does not clone, install,
+download, or modify CrystalFormer.
+
 ## Local Clone Mode
 
 Use this when you only need to run upstream CrystalFormer locally and do not
@@ -98,6 +125,80 @@ The FIIR adapter keeps raw `g` / `W` / `A` / `X` / `L` sequence fields whenever
 they are available, because later DPO preference pairs need CrystalFormer-native
 sequence information.
 
+## Real-Smoke Pipeline
+
+Load-only mode reads existing raw outputs and is the default:
+
+```bash
+python scripts/run_crystalformer_smoke_pipeline.py \
+  --input-dir outputs/crystalformer_raw/BaTiO3 \
+  --formula BaTiO3 \
+  --output-root outputs \
+  --parser-backend none \
+  --stability-mode unavailable_without_offline_validation
+```
+
+The pipeline writes:
+
+- `outputs/crystalformer_audit/BaTiO3/`
+- `outputs/dpo_preferences/BaTiO3/`
+- `outputs/crystalformer_smoke_pipeline/BaTiO3/provenance.json`
+- `outputs/crystalformer_smoke_pipeline/BaTiO3/pipeline_summary.json`
+- `outputs/crystalformer_smoke_pipeline/BaTiO3/report.md`
+
+For an end-to-end local fake fixture:
+
+```bash
+python scripts/run_crystalformer_smoke_pipeline.py \
+  --input-dir examples/crystalformer_raw/BaTiO3_fake \
+  --formula BaTiO3 \
+  --output-root outputs/crystalformer_smoke_fake \
+  --parser-backend none \
+  --stability-mode unavailable_without_offline_validation
+```
+
+To import already-computed local validation evidence, first check the join:
+
+```bash
+python scripts/check_offline_validation_import.py \
+  --audit-candidates-jsonl outputs/crystalformer_smoke_fake/crystalformer_audit/BaTiO3/audit_candidates.jsonl \
+  --validation-jsonl examples/crystalformer_validation/BaTiO3_fake_validation.jsonl \
+  --output-dir outputs/validation_import_check_fake
+```
+
+Then pass the validation JSONL to the smoke pipeline:
+
+```bash
+python scripts/run_crystalformer_smoke_pipeline.py \
+  --input-dir examples/crystalformer_raw/BaTiO3_fake \
+  --formula BaTiO3 \
+  --output-root outputs/crystalformer_smoke_fake_validated \
+  --parser-backend none \
+  --stability-mode unavailable_without_offline_validation \
+  --offline-validation-jsonl examples/crystalformer_validation/BaTiO3_fake_validation.jsonl
+```
+
+Validation import remains local-only. Rows must match candidate id, formula,
+optional spacegroup, and generation condition. Failed validation rows and
+mismatches are reported but do not make F3 available.
+
+Explicit-command mode is opt-in. The subprocess is executed only when
+`--run-generation` is present:
+
+```bash
+python scripts/run_crystalformer_smoke_pipeline.py \
+  --input-dir outputs/crystalformer_raw/BaTiO3 \
+  --formula BaTiO3 \
+  --crystalformer-work-dir external/CrystalFormer \
+  --crystalformer-command "python ./main.py ..." \
+  --run-generation
+```
+
+The command, cwd, stdout, stderr, and return code are written to provenance JSON.
+If the command or workdir is missing, the pipeline exits with a clear error.
+Without imported offline validation, F3 is reported as unavailable/unknown and
+no candidate is reported as stable.
+
 ## FIIR Smoke Audit Example
 
 Return to the FIIR Crystal repository root and audit the generated files:
@@ -114,3 +215,28 @@ python scripts/audit_crystalformer_outputs.py \
 The audit writes normalized candidates, failure vectors, per-candidate audit
 records, and a Markdown report. Without imported offline validation, F3 is
 reported as unknown/unavailable and no candidate is reported as stable.
+
+## DPO Training Boundary Manifest
+
+After a validated smoke run has produced `preference_pairs.jsonl`, prepare a
+handoff manifest for external CrystalFormer training:
+
+```bash
+python scripts/prepare_crystalformer_dpo_training_boundary.py \
+  --preference-pairs-jsonl outputs/crystalformer_smoke_fake_validated/dpo_preferences/BaTiO3/preference_pairs.jsonl \
+  --output-dir outputs/crystalformer_dpo_training_boundary/BaTiO3 \
+  --crystalformer-work-dir external/CrystalFormer
+```
+
+This validates the preference schema and writes:
+
+- `trainer_manifest.json`
+- `training_boundary_summary.json`
+- `training_command_provenance.json`
+- `report.md`
+
+The CLI does not run training by default. If a `--training-command` is supplied,
+it is recorded in the manifest and provenance. It is only executed when
+`--run-training` is also present. For real DPO work, prefer a CrystalFormer
+fork/submodule so trainer changes and DPO loss integration are tracked outside
+FIIR Crystal core.

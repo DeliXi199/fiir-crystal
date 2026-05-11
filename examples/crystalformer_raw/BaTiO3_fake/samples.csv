@@ -1,0 +1,6 @@
+candidate_id,g,W,A,X,L,formula,spacegroup,a,b,c,alpha,beta,gamma,structure_ref,source_checkpoint,temperature,top_k
+cf_fake_good_001,221,"a,b,c,c,c","Ba Ti O O O","0 0 0;0.5 0.5 0.5;0.5 0.5 0;0.5 0 0.5;0 0.5 0.5","4 4 4",BaTiO3,221,,,,,,,,fake-local-checkpoint,1.0,40
+cf_fake_overlap_002,221,"a,b,c,c,c","Ba Ti O O O","0 0 0;0.01 0.01 0.01;0.5 0.5 0;0.5 0 0.5;0 0.5 0.5","4 4 4",BaTiO3,221,,,,,,,,fake-local-checkpoint,1.0,40
+cf_fake_equal_003,221,"a,b,c,c,c","Ba Ti O O O","0 0 0;0.5 0.5 0.5;0.5 0.5 0;0.5 0 0.5;0 0.5 0.5","4 4 4",BaTiO3,221,,,,,,,,fake-local-checkpoint,1.0,40
+cf_fake_partial_sequence_004,221,"a,b,c,c,c","Ba Ti O O O","0 0 0;0.5 0.5 0.5;0.5 0.5 0;0.5 0 0.5;0 0.5 0.5",,BaTiO3,221,4,4,4,90,90,90,,fake-local-checkpoint,1.0,40
+cf_fake_unparsed_cif_005,221,"a,b,c,c,c",,,,BaTiO3,221,,,,,,,fake_partial.cif,fake-local-checkpoint,1.0,40

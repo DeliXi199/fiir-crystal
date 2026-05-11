@@ -13,7 +13,6 @@ from fiir_crystal.io import write_json, write_jsonl
 from fiir_crystal.structures import (
     CrystalStructureRecord,
     crystalformer_sequence_status,
-    has_crystalformer_raw_sequence,
 )
 from fiir_crystal.structures.serialization import write_jsonl as write_structure_jsonl
 
@@ -43,6 +42,10 @@ class AuditCandidateResult:
     preference_type: str | None = None
     condition: dict[str, Any] = field(default_factory=dict)
     raw_sequence_fields: dict[str, Any] = field(default_factory=dict)
+    offline_validation: dict[str, Any] | None = None
+    validation_status: str = "not_provided"
+    f3_source: str = F3_UNAVAILABLE_MODE
+    f3_validation_available: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +67,12 @@ class AuditCandidateResult:
             "preference_type": self.preference_type,
             "condition": dict(self.condition),
             "raw_sequence_fields": dict(self.raw_sequence_fields),
+            "offline_validation": (
+                None if self.offline_validation is None else dict(self.offline_validation)
+            ),
+            "validation_status": self.validation_status,
+            "f3_source": self.f3_source,
+            "f3_validation_available": self.f3_validation_available,
         }
 
 
@@ -93,6 +102,9 @@ class AuditSummary:
     top_parse_errors: list[dict[str, Any]]
     dpo_eligible_count: int = 0
     dpo_ineligible_count: int = 0
+    offline_validation_available_count: int = 0
+    offline_validation_error_count: int = 0
+    f3_validated_stable_count: int = 0
     condition: dict[str, Any] = field(default_factory=dict)
     stability_mode: str = F3_UNAVAILABLE_MODE
 
@@ -120,6 +132,9 @@ class AuditSummary:
             "top_parse_errors": [dict(item) for item in self.top_parse_errors],
             "dpo_eligible_count": self.dpo_eligible_count,
             "dpo_ineligible_count": self.dpo_ineligible_count,
+            "offline_validation_available_count": self.offline_validation_available_count,
+            "offline_validation_error_count": self.offline_validation_error_count,
+            "f3_validated_stable_count": self.f3_validated_stable_count,
             "condition": dict(self.condition),
             "stability_mode": self.stability_mode,
         }
@@ -191,9 +206,46 @@ def audit_candidates(
                 preference_type="geometry_chemistry_only" if dpo_eligible and f3_unknown else None,
                 condition=condition,
                 raw_sequence_fields=_raw_sequence_fields(metadata),
+                offline_validation=None,
+                validation_status="not_provided",
+                f3_source="unavailable_without_offline_validation" if f3_unknown else "fiir_oracle",
+                f3_validation_available=False,
             )
         )
     return results
+
+
+def audit_candidate_result_from_dict(row: dict[str, Any]) -> AuditCandidateResult:
+    """Rebuild an `AuditCandidateResult` from a JSON-compatible row."""
+
+    return AuditCandidateResult(
+        candidate_id=str(row["candidate_id"]),
+        composition=row.get("composition"),
+        source_format=str(row.get("source_format", "unknown")),
+        parse_status=str(row.get("parse_status", "unknown")),
+        raw_sequence_status=str(row.get("raw_sequence_status", "missing")),
+        f1_label=str(row.get("f1_label", "unknown")),
+        f2_label=str(row.get("f2_label", "unknown")),
+        f3_label=str(row.get("f3_label", "unknown")),
+        failure_vector=dict(row.get("failure_vector", {})),
+        evidence=dict(row.get("evidence", {})),
+        fiir_score=_as_float_or_none(row.get("fiir_score")),
+        ranking_score=_as_float_or_none(row.get("ranking_score")),
+        dpo_eligible=bool(row.get("dpo_eligible")),
+        dpo_ineligible_reasons=[str(item) for item in row.get("dpo_ineligible_reasons", [])],
+        failure_reasons=[str(item) for item in row.get("failure_reasons", [])],
+        preference_type=row.get("preference_type"),
+        condition=dict(row.get("condition", {})),
+        raw_sequence_fields=dict(row.get("raw_sequence_fields", {})),
+        offline_validation=(
+            dict(row["offline_validation"])
+            if isinstance(row.get("offline_validation"), dict)
+            else None
+        ),
+        validation_status=str(row.get("validation_status", "not_provided")),
+        f3_source=str(row.get("f3_source", F3_UNAVAILABLE_MODE)),
+        f3_validation_available=bool(row.get("f3_validation_available", False)),
+    )
 
 
 def summarize_audit(
@@ -253,6 +305,16 @@ def summarize_audit(
         top_parse_errors=_top_items(parse_errors),
         dpo_eligible_count=sum(result.dpo_eligible for result in results),
         dpo_ineligible_count=sum(not result.dpo_eligible for result in results),
+        offline_validation_available_count=sum(result.f3_validation_available for result in results),
+        offline_validation_error_count=sum(
+            result.validation_status in {"error", "failed", "validation_error"} for result in results
+        ),
+        f3_validated_stable_count=sum(
+            result.f3_validation_available
+            and isinstance(result.offline_validation, dict)
+            and result.offline_validation.get("is_stable") is True
+            for result in results
+        ),
         condition={"mode": "csp", "formula": formula, "spacegroup": spacegroup},
         stability_mode=stability_mode,
     )
@@ -339,10 +401,12 @@ def _condition_for(
 ) -> dict[str, Any]:
     metadata = record.metadata
     raw_spacegroup = metadata.get("spacegroup_condition", spacegroup)
+    generation = _generation_condition(metadata)
     return {
         "mode": metadata.get("condition_mode", "csp"),
         "formula": metadata.get("formula_condition") or formula or record.composition,
         "spacegroup": _optional_int(raw_spacegroup),
+        "generation": generation,
     }
 
 
@@ -354,17 +418,41 @@ def _dpo_eligibility(
     fiir_score: float | None,
 ) -> tuple[bool, list[str]]:
     reasons: list[str] = []
+    raw_sequence_status, missing_sequence_fields = crystalformer_sequence_status(record.metadata)
     if not record.candidate_id:
         reasons.append("missing_candidate_id")
     if not condition.get("formula"):
         reasons.append("missing_condition")
-    if not has_crystalformer_raw_sequence(record.metadata):
+    if raw_sequence_status == "missing":
         reasons.append("missing_raw_sequence")
+    elif raw_sequence_status == "partial":
+        reasons.append("partial_raw_sequence")
+        if missing_sequence_fields:
+            reasons.append("missing_sequence_fields:" + ",".join(missing_sequence_fields))
     if fiir_score is None:
         reasons.append("missing_comparable_fiir_score")
     if parse_status == "parse_error":
         reasons.append("parse_error")
     return not reasons, reasons
+
+
+def _generation_condition(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Return reproducibility fields that define the same generation condition."""
+
+    fields = {
+        "source_model": metadata.get("source_model"),
+        "source_checkpoint": metadata.get("source_checkpoint"),
+        "temperature": metadata.get("temperature"),
+        "top_k": metadata.get("top_k"),
+        "K": metadata.get("K"),
+    }
+    sampling = metadata.get("sampling_metadata")
+    if isinstance(sampling, dict):
+        for key in ("temperature", "sample_temperature", "sampling_temperature", "top_k", "K"):
+            fields.setdefault(key, sampling.get(key))
+            if fields.get(key) in (None, "") and sampling.get(key) not in (None, ""):
+                fields[key] = sampling[key]
+    return {key: value for key, value in fields.items() if value not in (None, "")}
 
 
 def _f3_is_unknown(stability_mode: str, f3_value: float | None) -> bool:
@@ -492,6 +580,9 @@ def _render_report(summary: AuditSummary) -> str:
         f"- f1_fail_rate: {data['f1_fail_rate']}",
         f"- f2_fail_rate: {data['f2_fail_rate']}",
         f"- f3_unknown_rate: {data['f3_unknown_rate']}",
+        f"- offline_validation_available_count: {data['offline_validation_available_count']}",
+        f"- offline_validation_error_count: {data['offline_validation_error_count']}",
+        f"- f3_validated_stable_count: {data['f3_validated_stable_count']}",
         f"- dpo_eligible_count: {data['dpo_eligible_count']}",
         f"- dpo_ineligible_count: {data['dpo_ineligible_count']}",
         "",

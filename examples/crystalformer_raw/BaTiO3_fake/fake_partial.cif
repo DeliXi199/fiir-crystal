@@ -1,0 +1,2 @@
+data_fake_partial
+_audit_creation_method 'FIIR Crystal fake smoke fixture'

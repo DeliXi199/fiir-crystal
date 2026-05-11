@@ -13,7 +13,12 @@ dataset.
   "condition": {
     "mode": "csp",
     "formula": "BaTiO3",
-    "spacegroup": null
+    "spacegroup": null,
+    "generation": {
+      "source_checkpoint": "...",
+      "temperature": "...",
+      "top_k": "..."
+    }
   },
   "chosen_candidate_id": "...",
   "rejected_candidate_id": "...",
@@ -48,10 +53,16 @@ dataset.
 - Do not pair candidates across formulas.
 - If a spacegroup condition is specified, both candidates must come from that
   same spacegroup condition.
+- Generation condition fields are provenance keys such as checkpoint,
+  temperature, and top-k/K sampling settings. If present, they must match.
 - Each side must retain CrystalFormer-native `g` / `W` / `A` / `X` / `L`
   fields, or an explicitly documented equivalent raw sequence representation.
 - Without F3 validation, only `geometry_chemistry_only` preferences may be
   constructed.
+- When both sides have successful imported offline validation evidence, the
+  preference type may be `stability_aware_offline_validation`.
+- If only one side has imported F3 evidence, the pair is skipped and counted as
+  `mixed_f3_validation_availability`.
 - Stability preferences require imported offline validation, MLFF relaxation
   results, or DFT results. The smoke audit must not claim stability
   optimization.

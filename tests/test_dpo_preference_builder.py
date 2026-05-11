@@ -3,7 +3,15 @@ import json
 from fiir_crystal.dpo import PreferenceBuildConfig, build_dpo_preferences
 
 
-def _audit_row(candidate_id: str, score: float, *, raw: bool = True, formula: str = "BaTiO3") -> dict:
+def _audit_row(
+    candidate_id: str,
+    score: float,
+    *,
+    raw: bool = True,
+    formula: str = "BaTiO3",
+    spacegroup=None,
+    generation=None,
+) -> dict:
     return {
         "candidate_id": candidate_id,
         "composition": formula,
@@ -25,7 +33,12 @@ def _audit_row(candidate_id: str, score: float, *, raw: bool = True, formula: st
         "dpo_eligible": raw,
         "dpo_ineligible_reasons": [] if raw else ["missing_raw_sequence"],
         "preference_type": "geometry_chemistry_only" if raw else None,
-        "condition": {"mode": "csp", "formula": formula, "spacegroup": None},
+        "condition": {
+            "mode": "csp",
+            "formula": formula,
+            "spacegroup": spacegroup,
+            "generation": generation or {},
+        },
         "raw_sequence_fields": (
             {"g": "221", "W": "W" + candidate_id, "A": "A" + candidate_id, "X": "X" + candidate_id, "L": "L" + candidate_id}
             if raw
@@ -70,6 +83,33 @@ def test_build_dpo_preferences_does_not_cross_formula() -> None:
     assert pairs == []
     assert summary.condition_count == 2
     assert summary.skip_reasons["condition_group_too_small"] == 2
+    assert summary.skip_reasons["different_formula_condition"] == 1
+
+
+def test_build_dpo_preferences_does_not_cross_spacegroup_condition() -> None:
+    rows = [
+        _audit_row("sg_221", 0.0, spacegroup=221),
+        _audit_row("sg_62", 0.4, spacegroup=62),
+    ]
+
+    pairs, summary = build_dpo_preferences(rows, PreferenceBuildConfig(formula="BaTiO3"))
+
+    assert pairs == []
+    assert summary.condition_count == 2
+    assert summary.skip_reasons["different_spacegroup_condition"] == 1
+
+
+def test_build_dpo_preferences_does_not_cross_generation_condition() -> None:
+    rows = [
+        _audit_row("temp_1", 0.0, generation={"temperature": "1.0", "top_k": "40"}),
+        _audit_row("temp_2", 0.4, generation={"temperature": "2.0", "top_k": "40"}),
+    ]
+
+    pairs, summary = build_dpo_preferences(rows, PreferenceBuildConfig(formula="BaTiO3"))
+
+    assert pairs == []
+    assert summary.condition_count == 2
+    assert summary.skip_reasons["different_generation_condition"] == 1
 
 
 def test_build_dpo_preferences_records_no_comparable_margin() -> None:

@@ -519,6 +519,10 @@ def _resolve(base: Path, raw_path: Any) -> Path:
 
 
 def _first_value(row: dict[str, str], *names: str) -> str | None:
+    for name in names:
+        value = row.get(name)
+        if value not in (None, ""):
+            return value
     lookup = {key.lower(): value for key, value in row.items()}
     for name in names:
         value = lookup.get(name.lower())

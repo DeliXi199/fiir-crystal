@@ -190,6 +190,10 @@ def test_cli_help_and_missing_input_are_clear() -> None:
         "scripts/compare_experiments.py",
         "scripts/run_mock_active_loop.py",
         "scripts/run_crystalformer_adapter.py",
+        "scripts/check_crystalformer_workspace.py",
+        "scripts/check_offline_validation_import.py",
+        "scripts/run_crystalformer_smoke_pipeline.py",
+        "scripts/prepare_crystalformer_dpo_training_boundary.py",
     ]
     for script in scripts:
         completed = subprocess.run(

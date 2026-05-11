@@ -32,6 +32,11 @@ Implemented today:
 - Mock feedback buffer and multi-round active discovery loop simulation.
 - External generator adapter boundary plus a first CrystalFormer output adapter
   for `deepmodeling/CrystalFormer` outputs.
+- CrystalFormer real-smoke integration pipeline that connects local raw outputs
+  to audit artifacts and schema-first DPO preference artifacts.
+- Offline validation import boundary for CrystalFormer smoke audits, including
+  validation-aware F3 labels and stability-aware preference artifacts when
+  local evidence is available.
 
 ## Install
 
@@ -152,6 +157,83 @@ See `docs/setup/crystalformer_workspace.md` for clone/submodule commands and
 environment guidance. CrystalFormer, JAX, torch, pymatgen, and ASE are not core
 runtime dependencies of `fiir_crystal`; the core package remains stdlib-only.
 
+Check the local workspace without cloning, installing, or downloading anything:
+
+```bash
+python scripts/check_crystalformer_workspace.py --output-dir outputs/workspace_check
+```
+
+This writes `workspace_check.json` and `workspace_check.md`, checks whether
+`external/CrystalFormer` is missing, a normal clone, or submodule-like, and can
+create the FIIR output directories if they are absent.
+
+## CrystalFormer Real-Smoke Pipeline
+
+The recommended workflow for this phase is:
+
+1. Check the external workspace.
+2. Run CrystalFormer externally or point FIIR at already existing raw outputs.
+3. Run the smoke pipeline.
+4. Inspect the audit artifacts.
+5. Build and inspect the DPO preference artifact.
+
+Load-only mode is the default and is safe for local tests:
+
+```bash
+python scripts/run_crystalformer_smoke_pipeline.py \
+  --input-dir examples/crystalformer_raw/BaTiO3_fake \
+  --formula BaTiO3 \
+  --output-root outputs/crystalformer_smoke_fake \
+  --parser-backend none \
+  --stability-mode unavailable_without_offline_validation
+```
+
+This writes audit artifacts under
+`outputs/crystalformer_smoke_fake/crystalformer_audit/BaTiO3/`, DPO preference
+artifacts under
+`outputs/crystalformer_smoke_fake/dpo_preferences/BaTiO3/`, and pipeline
+provenance/report files under
+`outputs/crystalformer_smoke_fake/crystalformer_smoke_pipeline/BaTiO3/`.
+
+Explicit-command mode is opt-in. FIIR only runs the command when
+`--run-generation` is present:
+
+```bash
+python scripts/run_crystalformer_smoke_pipeline.py \
+  --input-dir outputs/crystalformer_raw/BaTiO3 \
+  --formula BaTiO3 \
+  --crystalformer-work-dir external/CrystalFormer \
+  --crystalformer-command "python ./main.py ..." \
+  --run-generation
+```
+
+The subprocess command, cwd, stdout, stderr, and return code are recorded in
+`provenance.json` before audit and DPO artifact construction continues. If F3
+offline validation is not imported, F3 is explicitly unavailable/unknown and no
+candidate is reported as stable.
+
+Optional offline validation import reads local JSONL evidence only:
+
+```bash
+python scripts/check_offline_validation_import.py \
+  --audit-candidates-jsonl outputs/crystalformer_smoke_fake/crystalformer_audit/BaTiO3/audit_candidates.jsonl \
+  --validation-jsonl examples/crystalformer_validation/BaTiO3_fake_validation.jsonl \
+  --output-dir outputs/validation_import_check_fake
+
+python scripts/run_crystalformer_smoke_pipeline.py \
+  --input-dir examples/crystalformer_raw/BaTiO3_fake \
+  --formula BaTiO3 \
+  --output-root outputs/crystalformer_smoke_fake_validated \
+  --parser-backend none \
+  --stability-mode unavailable_without_offline_validation \
+  --offline-validation-jsonl examples/crystalformer_validation/BaTiO3_fake_validation.jsonl
+```
+
+Validation rows are matched by candidate id, formula, optional spacegroup, and
+generation condition. Failed or mismatched rows are counted in the import
+summary and do not make F3 available. This is still not DFT, not MLIP, and not
+DPO training.
+
 ## Smoke Audit for CrystalFormer Outputs
 
 Run a smoke audit over real CrystalFormer output files:
@@ -174,7 +256,7 @@ Without offline validation, F3 must not be reported as stable.
 ## DPO Data Preparation Boundary
 
 This stage is not DPO training. The goal is to run the engineering loop:
-CrystalFormer output -> FIIR audit -> DPO eligibility marking.
+CrystalFormer output -> FIIR audit -> DPO preference artifact.
 
 Future DPO preference pairs must come from the same formula and generation
 condition. If a spacegroup condition is specified, pairs must share it. Each
@@ -183,6 +265,8 @@ documented equivalent raw sequence. Without F3 validation, future pairs can only
 represent geometry/chemistry preferences; they must not claim stability
 optimization. The schema is documented in
 `docs/specs/crystalformer_dpo_data_schema.md`.
+When both sides of a same-condition pair have successful imported offline F3
+evidence, the builder may emit `stability_aware_offline_validation`.
 
 To build the current schema-only preference-pair artifact from an audit:
 
@@ -197,6 +281,27 @@ This writes `preference_pairs.jsonl`, `preference_summary.json`, and
 `report.md`. If all eligible candidates have equal FIIR scores, the builder
 emits zero pairs and records `no_comparable_margin`; it does not fabricate DPO
 labels.
+
+## CrystalFormer DPO Training Boundary
+
+FIIR Crystal can prepare a handoff manifest for future external CrystalFormer
+DPO training. This still does not implement or run training in core:
+
+```bash
+python scripts/prepare_crystalformer_dpo_training_boundary.py \
+  --preference-pairs-jsonl outputs/crystalformer_smoke_fake_validated/dpo_preferences/BaTiO3/preference_pairs.jsonl \
+  --output-dir outputs/crystalformer_dpo_training_boundary/BaTiO3 \
+  --crystalformer-work-dir external/CrystalFormer
+```
+
+The command validates pair schema, checks the CrystalFormer workspace, writes
+`trainer_manifest.json`, `training_boundary_summary.json`, `report.md`, and
+`training_command_provenance.json`. If `--training-command` is provided, it is
+recorded but not executed unless `--run-training` is also present.
+
+For real training later, use a prepared CrystalFormer fork/submodule and an
+explicit external command. FIIR records stdout, stderr, return code, cwd, and
+command provenance, but it does not import JAX/torch or provide a DPO loss.
 
 ## Output Files
 
@@ -233,22 +338,37 @@ plus `feedback_buffer.jsonl`, `active_loop_state.json`,
 - `fiir_crystal.config`: lightweight config loader.
 - `fiir_crystal.reporting`: Markdown report generator.
 - `fiir_crystal.validation`: offline validation result records and joins.
+- `fiir_crystal.validation.offline_import`: local validation import into
+  CrystalFormer smoke audits.
+- `fiir_crystal.dpo.training_boundary`: external CrystalFormer DPO trainer
+  manifest and readiness checks.
 - `fiir_crystal.comparison`: pair mode comparison and run aggregation.
 - `fiir_crystal.feedback`: feedback buffer and mock active loop simulation.
 
 ## Current Limitations
 
 - Mock structures are not physical crystal objects.
-- F2 chemistry and F3 stability are lightweight placeholders.
+- F2 chemistry is a lightweight placeholder. F3 is unavailable unless local
+  offline validation is imported.
 - CrystalFormer adapter parsing is conservative and does not parse CIF contents
   without an optional external parser.
-- No MLIP, DFT, database novelty, synthesizability model, or real training is run.
+- No MLIP, DFT, database novelty, synthesizability model, or in-core real training is run.
 - Pareto ranking is intentionally small and deterministic.
 - Active loop rounds reuse mock candidates with metadata hints; no generator is trained.
 
 ## Next Steps
 
-- Add optional local adapters for real structure objects.
-- Keep FSAL trainer as an adapter boundary until real training is explicitly needed.
-- Add richer local validation adapters only when results are already available offline.
-- Add config hashes and seed sweeps for larger reproducibility studies.
+Phase A: real-smoke pipeline
+
+- Keep the CrystalFormer smoke pipeline reproducible on fake and local raw outputs.
+- Expand fixture coverage only with tiny fake outputs or user-provided local artifacts.
+
+Phase B: offline validation / MLIP import boundary
+
+- Expand already-computed validation imports to additional local formats.
+- Keep validation imports local and optional; do not run DFT, MLIP, or external APIs from core.
+
+Phase C: CrystalFormer DPO training adapter boundary
+
+- Use the trainer manifest with a recorded CrystalFormer fork/submodule.
+- Implement DPO loss integration in that external workspace, without adding torch/JAX/pymatgen/ASE to `fiir_crystal` core dependencies.
