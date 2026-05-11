@@ -37,6 +37,8 @@ def test_crystalformer_policy_submitter_encodes_partition_order() -> None:
     assert "regular256 regular128 regular6430 regular test" in text
     assert "FIIR_EXPECTED_MINUTES" in text
     assert "FIIR_SHORT_TASK_MINUTES" in text
+    assert "normalize_partition_name" in text
+    assert "regular256*" in text
     assert "idle_node_count" in text
     assert "sinfo" in text
     assert "regular)" in text

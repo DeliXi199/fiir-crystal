@@ -413,6 +413,8 @@ idle `test` node for jobs expected to finish within 30 minutes, otherwise checks
 `regular256`, `regular128`, `regular6430`, `regular`, then `test`; if no idle
 node exists, it queues on all of those partitions. It requests one exclusive
 node and uses 56 cores on `regular` or 64 cores on the other CPU partitions.
+If `sinfo` displays `regular256*`, the `*` only marks the default partition;
+the actual partition name used by `sbatch` is `regular256`.
 All SLURM stdout/stderr files are written under `logs/slurm/` by default.
 
 The example config uses `examples/crystalformer_bulk/fake_generate.py` so tests

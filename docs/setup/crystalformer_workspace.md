@@ -376,7 +376,8 @@ otherwise it checks `regular256`, `regular128`, `regular6430`, `regular`, then
 `test`. If no idle node exists, it queues on all listed partitions. It requests
 one exclusive node and lets the runner use 56 cores on `regular` or 64 cores on
 the other CPU partitions. SLURM stdout/stderr files are collected under
-`logs/slurm/` by default.
+`logs/slurm/` by default. If `sinfo` displays `regular256*`, the `*` only marks
+the default partition; the actual partition name is `regular256`.
 
 The default checked-in config uses a fake stdlib-only generator. The real
 example config keeps `num_samples` small and assumes a prepared external

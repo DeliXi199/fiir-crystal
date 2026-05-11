@@ -16,6 +16,10 @@ that node. Partition selection follows this policy:
 - If none have idle nodes, queue on all policy partitions:
   `regular256,regular128,regular6430,regular,test`.
 - `regular` is treated as 56 cores; all other listed CPU partitions are treated as 64 cores.
+- `sinfo` may display the default partition as `regular256*`. The trailing
+  `*` is only a display marker, not part of the partition name. Use
+  `regular256` in `FIIR_FORCE_PARTITION` or `FIIR_PARTITION_ORDER`; the
+  submitter also strips a trailing `*` defensively.
 
 The direct SLURM file still works with `sbatch`, but the wrapper is the
 recommended entrypoint. The default job is safe: it only writes a bulk plan and

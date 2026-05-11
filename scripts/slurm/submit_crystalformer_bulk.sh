@@ -20,8 +20,17 @@ FIIR_FORCE_PARTITION="${FIIR_FORCE_PARTITION:-}"
 FIIR_TIME_LIMIT="${FIIR_TIME_LIMIT:-}"
 FIIR_SLURM_LOG_DIR="${FIIR_SLURM_LOG_DIR:-logs/slurm}"
 
+normalize_partition_name() {
+  local partition="$1"
+  # sinfo marks the default partition with a trailing '*', for example
+  # regular256*. The star is display-only and must not be passed to sbatch.
+  printf '%s\n' "${partition%\*}"
+}
+
 partition_cores() {
-  case "$1" in
+  local partition
+  partition="$(normalize_partition_name "$1")"
+  case "$partition" in
     regular)
       printf '56\n'
       ;;
@@ -35,6 +44,7 @@ join_partitions() {
   local joined=""
   local partition
   for partition in $FIIR_PARTITION_ORDER; do
+    partition="$(normalize_partition_name "$partition")"
     if [ -z "$joined" ]; then
       joined="$partition"
     else
@@ -45,7 +55,8 @@ join_partitions() {
 }
 
 idle_node_count() {
-  local partition="$1"
+  local partition
+  partition="$(normalize_partition_name "$1")"
   if ! command -v sinfo >/dev/null 2>&1; then
     printf '0\n'
     return
@@ -68,6 +79,9 @@ require_integer() {
 require_integer "FIIR_EXPECTED_MINUTES" "$FIIR_EXPECTED_MINUTES"
 require_integer "FIIR_SHORT_TASK_MINUTES" "$FIIR_SHORT_TASK_MINUTES"
 
+FIIR_TEST_PARTITION="$(normalize_partition_name "$FIIR_TEST_PARTITION")"
+FIIR_FORCE_PARTITION="$(normalize_partition_name "$FIIR_FORCE_PARTITION")"
+
 selected_partition=""
 selected_reason=""
 
@@ -80,6 +94,7 @@ elif [ "$FIIR_EXPECTED_MINUTES" -le "$FIIR_SHORT_TASK_MINUTES" ] \
   selected_reason="short_job_idle_test"
 else
   for partition in $FIIR_PARTITION_ORDER; do
+    partition="$(normalize_partition_name "$partition")"
     if [ "$(idle_node_count "$partition")" -gt 0 ]; then
       selected_partition="$partition"
       selected_reason="first_idle_in_policy_order"
