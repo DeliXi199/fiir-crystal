@@ -222,6 +222,39 @@ def test_bulk_generation_run_generation_executes_fake_and_smoke(tmp_path) -> Non
     assert "wrote fake CrystalFormer raw output" in provenance["stdout"]
 
 
+def test_bulk_generation_auto_parallelism_uses_total_cpu_budget(tmp_path) -> None:
+    config = _config(tmp_path)
+    output_root = tmp_path / "parallel"
+
+    result = main(
+        [
+            "--config",
+            str(config),
+            "--output-root",
+            str(output_root),
+            "--run-generation",
+            "--no-skip-existing",
+            "--total-cpu-cores",
+            "4",
+        ]
+    )
+
+    summary = result["summary"]
+    assert summary["status_counts"] == {"succeeded": 2}
+    assert summary["parallelism"]["max_concurrent_generations"] == 2
+    assert summary["parallelism"]["thread_allocations"] == [2, 2]
+    assert summary["parallelism"]["parallel_core_budget"] == 4
+    for formula in ("BaTiO3", "SrTiO3"):
+        provenance = json.loads(
+            (output_root / "formula_runs" / formula / "generation_provenance.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert provenance["generation_cpu_threads"] == 2
+        assert provenance["env_overrides"]["OMP_NUM_THREADS"] == "2"
+        assert "intra_op_parallelism_threads=2" in provenance["env_overrides"]["XLA_FLAGS"]
+
+
 def test_bulk_generation_only_formula(tmp_path) -> None:
     config = _config(tmp_path)
     output_root = tmp_path / "only"

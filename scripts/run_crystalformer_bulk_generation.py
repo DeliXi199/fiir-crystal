@@ -30,6 +30,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--continue-on-error", action="store_true")
     parser.add_argument("--skip-existing", action="store_true")
     parser.add_argument("--no-skip-existing", action="store_true")
+    parser.add_argument("--max-concurrent-generations", type=int)
+    parser.add_argument("--generation-cpu-threads", type=int)
+    parser.add_argument("--total-cpu-cores", type=int)
     return parser.parse_args(argv)
 
 
@@ -61,6 +64,9 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                 continue_on_error=args.continue_on_error,
                 skip_existing=skip_existing,
                 output_root=Path(args.output_root) if args.output_root else None,
+                max_concurrent_generations=args.max_concurrent_generations,
+                generation_cpu_threads=args.generation_cpu_threads,
+                total_cpu_cores=args.total_cpu_cores,
             )
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
@@ -80,6 +86,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
 
     print("CrystalFormer bulk generation orchestration complete")
     print(f"  run_generation: {summary['run_generation']}")
+    print(f"  parallelism: {summary['parallelism']}")
     print(f"  formula_count: {summary['formula_count']}")
     print(f"  completed_formula_count: {summary['completed_formula_count']}")
     print(f"  status_counts: {summary['status_counts']}")

@@ -8,8 +8,10 @@ It never clones, installs, downloads, trains, or calls external APIs.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 from string import Formatter
@@ -143,28 +145,51 @@ def run_crystalformer_bulk_generation(
     continue_on_error: bool = False,
     skip_existing: bool | None = None,
     output_root: Path | None = None,
+    max_concurrent_generations: int | None = None,
+    generation_cpu_threads: int | None = None,
+    total_cpu_cores: int | None = None,
 ) -> dict[str, Any]:
     """Run a bulk plan, optionally executing generation commands."""
 
     cfg = _with_output_override(config, output_root)
     skip_existing_effective = cfg.skip_existing if skip_existing is None else skip_existing
     plan = build_bulk_plan(cfg, only_formula=only_formula, skip_existing=skip_existing_effective)
+    parallelism = _resolve_parallelism(
+        plan,
+        run_generation=run_generation,
+        max_concurrent_generations=max_concurrent_generations,
+        generation_cpu_threads=generation_cpu_threads,
+        total_cpu_cores=total_cpu_cores,
+    )
+    plan = _annotate_plan_parallelism(plan, parallelism)
     cfg.output_root.mkdir(parents=True, exist_ok=True)
-    write_json(cfg.output_root / "bulk_plan.json", {"items": plan, "run_generation": run_generation})
+    write_json(
+        cfg.output_root / "bulk_plan.json",
+        {"items": plan, "run_generation": run_generation, "parallelism": parallelism},
+    )
 
-    rows = []
-    for item in plan:
-        row = _run_plan_item(
+    if run_generation and parallelism["max_concurrent_generations"] > 1:
+        rows = _run_plan_items_parallel(
             cfg,
-            item,
+            plan,
             run_generation=run_generation,
             continue_on_error=continue_on_error,
+            max_workers=int(parallelism["max_concurrent_generations"]),
         )
-        rows.append(row)
-        if row["status"] == "failed" and not continue_on_error:
-            break
+    else:
+        rows = []
+        for item in plan:
+            row = _run_plan_item(
+                cfg,
+                item,
+                run_generation=run_generation,
+                continue_on_error=continue_on_error,
+            )
+            rows.append(row)
+            if row["status"] == "failed" and not continue_on_error:
+                break
 
-    summary = _bulk_summary(cfg, plan, rows, run_generation=run_generation)
+    summary = _bulk_summary(cfg, plan, rows, run_generation=run_generation, parallelism=parallelism)
     files = {
         "plan": str(cfg.output_root / "bulk_plan.json"),
         "summary": str(cfg.output_root / "bulk_summary.json"),
@@ -285,12 +310,71 @@ def _run_plan_item(
     return row
 
 
+def _run_plan_items_parallel(
+    config: CrystalFormerBulkConfig,
+    plan: Sequence[dict[str, Any]],
+    *,
+    run_generation: bool,
+    continue_on_error: bool,
+    max_workers: int,
+) -> list[dict[str, Any]]:
+    results: dict[int, dict[str, Any]] = {}
+    next_index = 0
+    stop_scheduling = False
+    in_flight: dict[Future[dict[str, Any]], tuple[int, dict[str, Any]]] = {}
+
+    def submit_next(executor: ThreadPoolExecutor) -> None:
+        nonlocal next_index
+        item = plan[next_index]
+        future = executor.submit(
+            _run_plan_item,
+            config,
+            item,
+            run_generation=run_generation,
+            continue_on_error=continue_on_error,
+        )
+        in_flight[future] = (next_index, item)
+        next_index += 1
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        while next_index < len(plan) and len(in_flight) < max_workers:
+            submit_next(executor)
+        while in_flight:
+            done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+            for future in done:
+                index, item = in_flight.pop(future)
+                try:
+                    row = future.result()
+                except Exception as exc:
+                    row = _exception_row(item, exc)
+                results[index] = row
+                if row["status"] == "failed" and not continue_on_error:
+                    stop_scheduling = True
+            while not stop_scheduling and next_index < len(plan) and len(in_flight) < max_workers:
+                submit_next(executor)
+
+    return [results[index] for index in sorted(results)]
+
+
+def _exception_row(item: dict[str, Any], exc: Exception) -> dict[str, Any]:
+    return {
+        "formula": item["formula"],
+        "raw_output_dir": item["raw_output_dir"],
+        "provenance": None,
+        "status": "failed",
+        "generation_returncode": None,
+        "smoke_summary": None,
+        "error": f"{exc.__class__.__name__}: {exc}",
+    }
+
+
 def _bulk_summary(
     config: CrystalFormerBulkConfig,
     plan: Sequence[dict[str, Any]],
     rows: Sequence[dict[str, Any]],
     *,
     run_generation: bool,
+    parallelism: dict[str, Any],
 ) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     total_candidates = 0
@@ -311,6 +395,7 @@ def _bulk_summary(
         "bulk_generation": "crystalformer_existing_checkpoint_orchestration",
         "train_dpo": False,
         "run_generation": run_generation,
+        "parallelism": parallelism,
         "formula_count": len(plan),
         "completed_formula_count": len(rows),
         "status_counts": dict(sorted(status_counts.items())),
@@ -436,6 +521,7 @@ def _render_bulk_report(summary: dict[str, Any]) -> str:
         "- Commands run only when `--run-generation` is supplied.",
         "",
         "## Summary",
+        f"- parallelism: {summary['parallelism']}",
         f"- formula_count: {summary['formula_count']}",
         f"- completed_formula_count: {summary['completed_formula_count']}",
         f"- status_counts: {summary['status_counts']}",
@@ -447,6 +533,66 @@ def _render_bulk_report(summary: dict[str, Any]) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _resolve_parallelism(
+    plan: Sequence[dict[str, Any]],
+    *,
+    run_generation: bool,
+    max_concurrent_generations: int | None,
+    generation_cpu_threads: int | None,
+    total_cpu_cores: int | None,
+) -> dict[str, Any]:
+    plan_count = len(plan)
+    if not run_generation or plan_count == 0:
+        return {
+            "max_concurrent_generations": 1,
+            "generation_cpu_threads": None,
+            "total_cpu_cores": total_cpu_cores,
+            "thread_allocations": [],
+            "parallel_core_budget": 0,
+        }
+
+    requested_workers = _positive_int_or_none(max_concurrent_generations)
+    total_cores = _positive_int_or_none(total_cpu_cores)
+    fixed_threads = _positive_int_or_none(generation_cpu_threads)
+    if requested_workers is None:
+        requested_workers = plan_count if total_cores is not None else 1
+    workers = max(1, min(plan_count, requested_workers))
+
+    if fixed_threads is not None:
+        allocations = [fixed_threads for _ in range(workers)]
+    elif total_cores is not None:
+        base = max(1, total_cores // workers)
+        remainder = max(0, total_cores - base * workers)
+        allocations = [base + (1 if index < remainder else 0) for index in range(workers)]
+    else:
+        allocations = [1 for _ in range(workers)]
+
+    return {
+        "max_concurrent_generations": workers,
+        "generation_cpu_threads": fixed_threads,
+        "total_cpu_cores": total_cores,
+        "thread_allocations": allocations,
+        "parallel_core_budget": sum(allocations),
+    }
+
+
+def _annotate_plan_parallelism(
+    plan: Sequence[dict[str, Any]],
+    parallelism: dict[str, Any],
+) -> list[dict[str, Any]]:
+    allocations = list(parallelism.get("thread_allocations") or [])
+    if not allocations:
+        return [dict(item) for item in plan]
+    rows = []
+    for index, item in enumerate(plan):
+        slot = index % len(allocations)
+        row = dict(item)
+        row["generation_slot"] = slot
+        row["generation_cpu_threads"] = allocations[slot]
+        rows.append(row)
+    return rows
 
 
 def _formula_config(row: Any, default_num_samples: int, default_top_k: int) -> BulkFormulaConfig:
@@ -526,6 +672,9 @@ def _execute_generation(item: dict[str, Any]) -> dict[str, Any]:
             returncode=127,
         )
     args = shlex.split(str(item["command"]))
+    env_overrides = _generation_env_overrides(item)
+    env = os.environ.copy()
+    env.update(env_overrides)
     completed = subprocess.run(
         args,
         cwd=str(work_dir),
@@ -533,6 +682,7 @@ def _execute_generation(item: dict[str, Any]) -> dict[str, Any]:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
     )
     return _generation_provenance(
         item,
@@ -542,6 +692,7 @@ def _execute_generation(item: dict[str, Any]) -> dict[str, Any]:
         stdout=completed.stdout,
         stderr=completed.stderr,
         args=args,
+        env_overrides=env_overrides,
     )
 
 
@@ -554,6 +705,7 @@ def _generation_provenance(
     stdout: str | None = None,
     stderr: str | None = None,
     args: list[str] | None = None,
+    env_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "formula": item["formula"],
@@ -566,6 +718,9 @@ def _generation_provenance(
         "stdout": stdout,
         "stderr": stderr,
         "raw_output_dir": item["raw_output_dir"],
+        "env_overrides": env_overrides or {},
+        "generation_slot": item.get("generation_slot"),
+        "generation_cpu_threads": item.get("generation_cpu_threads"),
     }
 
 
@@ -590,6 +745,22 @@ def _checkpoint_files(path: Path) -> list[str]:
     if path.is_dir():
         return [str(candidate) for candidate in sorted(path.glob("*.pkl"))]
     return []
+
+
+def _generation_env_overrides(item: dict[str, Any]) -> dict[str, str]:
+    threads = _positive_int_or_none(item.get("generation_cpu_threads"))
+    if threads is None:
+        return {}
+    overrides = {
+        "OMP_NUM_THREADS": str(threads),
+        "MKL_NUM_THREADS": str(threads),
+        "OPENBLAS_NUM_THREADS": str(threads),
+        "NUMEXPR_NUM_THREADS": str(threads),
+    }
+    xla_flags = os.environ.get("XLA_FLAGS", "").strip()
+    cpu_flags = f"--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads={threads}"
+    overrides["XLA_FLAGS"] = f"{xla_flags} {cpu_flags}".strip()
+    return overrides
 
 
 def _with_output_override(
@@ -632,3 +803,12 @@ def _optional_int(value: Any) -> int | None:
     if value in (None, "", "null", "None", "none"):
         return None
     return int(float(str(value)))
+
+
+def _positive_int_or_none(value: Any) -> int | None:
+    if value in (None, "", "0", 0, "auto", "AUTO", "none", "None", "null"):
+        return None
+    number = int(float(str(value)))
+    if number <= 0:
+        return None
+    return number

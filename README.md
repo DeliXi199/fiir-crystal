@@ -295,6 +295,13 @@ FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_3x20 \
 sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
 ```
 
+The SLURM template now passes the full node CPU budget to the runner. With
+`--run-generation`, the runner automatically runs formulas concurrently and
+assigns CPU threads to each CrystalFormer subprocess. On the 64-core test node,
+the 3x20 template runs three CrystalFormer commands at once with thread
+allocations like `22, 21, 21`. The resolved allocation is written to
+`bulk_summary.json` and each formula's `generation_provenance.json`.
+
 The example config uses `examples/crystalformer_bulk/fake_generate.py` so tests
 remain offline and stdlib-only. The real example config is a template for an
 existing local CrystalFormer workspace and checkpoint; it is not expected to

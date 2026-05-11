@@ -257,6 +257,13 @@ FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_3x20 \
 sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
 ```
 
+By default, the SLURM wrapper passes `FIIR_TOTAL_CPU_CORES=$ncpu` to the bulk
+runner. The runner uses that budget for formula-level concurrency plus
+per-process CPU threading. For example, a 64-core node with three formulas
+gets three concurrent CrystalFormer subprocesses with thread allocations like
+`22, 21, 21`. Override this only when needed with
+`FIIR_MAX_CONCURRENT_GENERATIONS` or `FIIR_GENERATION_CPU_THREADS`.
+
 The default checked-in config uses a fake stdlib-only generator. The real
 example config keeps `num_samples` small and assumes a prepared external
 CrystalFormer workspace plus checkpoint. Use `--only-formula BaTiO3` for a

@@ -15,6 +15,8 @@
 #   FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke
 #   FIIR_ONLY_FORMULA=BaTiO3
 #   FIIR_CONDA_ENV=crystalformer
+#   FIIR_MAX_CONCURRENT_GENERATIONS=auto
+#   FIIR_GENERATION_CPU_THREADS=auto
 #   FIIR_MODULES="cuda/12.1"
 #
 #SBATCH --account=hmt03
@@ -80,9 +82,18 @@ FIIR_VALIDATE_ONLY="${FIIR_VALIDATE_ONLY:-0}"
 FIIR_RUN_GENERATION="${FIIR_RUN_GENERATION:-0}"
 FIIR_CONTINUE_ON_ERROR="${FIIR_CONTINUE_ON_ERROR:-0}"
 FIIR_SKIP_EXISTING_MODE="${FIIR_SKIP_EXISTING_MODE:-default}"
+FIIR_TOTAL_CPU_CORES="${FIIR_TOTAL_CPU_CORES:-}"
+FIIR_MAX_CONCURRENT_GENERATIONS="${FIIR_MAX_CONCURRENT_GENERATIONS:-auto}"
+FIIR_GENERATION_CPU_THREADS="${FIIR_GENERATION_CPU_THREADS:-auto}"
 
 ncpu=$((${SLURM_JOB_NUM_NODES:-1} * ${SLURM_NTASKS_PER_NODE:-1}))
+if [ -z "${FIIR_TOTAL_CPU_CORES}" ]; then
+  FIIR_TOTAL_CPU_CORES="${ncpu}"
+fi
 echo "Computed ncpu=${ncpu}"
+echo "FIIR_TOTAL_CPU_CORES=${FIIR_TOTAL_CPU_CORES}"
+echo "FIIR_MAX_CONCURRENT_GENERATIONS=${FIIR_MAX_CONCURRENT_GENERATIONS}"
+echo "FIIR_GENERATION_CPU_THREADS=${FIIR_GENERATION_CPU_THREADS}"
 echo "CrystalFormer bulk orchestration starts at $(date)"
 
 cmd=(
@@ -92,7 +103,17 @@ cmd=(
   "${FIIR_BULK_CONFIG}"
   "--output-root"
   "${FIIR_OUTPUT_ROOT}"
+  "--total-cpu-cores"
+  "${FIIR_TOTAL_CPU_CORES}"
 )
+
+if [ "${FIIR_MAX_CONCURRENT_GENERATIONS}" != "auto" ]; then
+  cmd+=("--max-concurrent-generations" "${FIIR_MAX_CONCURRENT_GENERATIONS}")
+fi
+
+if [ "${FIIR_GENERATION_CPU_THREADS}" != "auto" ]; then
+  cmd+=("--generation-cpu-threads" "${FIIR_GENERATION_CPU_THREADS}")
+fi
 
 if [ -n "${FIIR_ONLY_FORMULA}" ]; then
   cmd+=("--only-formula" "${FIIR_ONLY_FORMULA}")
