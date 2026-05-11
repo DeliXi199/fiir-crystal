@@ -37,3 +37,9 @@ Each validation row uses `candidate_id` to join back to rankings and feedback:
 - `synthesizability_score`: mock score in `[0, 1]`.
 - `error_message`: non-empty for failed validation imports.
 - `metadata`: audit notes for tests and reports.
+
+`mlip_validation/BaTiO3_fake_mlip_validation.jsonl` is a documentation fixture
+for the optional external MLIP validation workflow. It is hand-written and does
+not run MACE, CHGNet, MatGL, DFT, relaxation, downloads, or external APIs. Use
+it to exercise `scripts/normalize_offline_validation_results.py` and to inspect
+the expected local result fields before configuring a real MLIP environment.

@@ -234,6 +234,37 @@ generation condition. Failed or mismatched rows are counted in the import
 summary and do not make F3 available. This is still not DFT, not MLIP, and not
 DPO training.
 
+## Optional MLIP Validation Workspace
+
+MLIP validation is an external workflow, not a core dependency. FIIR can plan
+and normalize local MLIP result files, but it does not install or run MACE,
+CHGNet, MatGL, ASE, pymatgen, torch, DFT, downloads, or APIs.
+
+Prepare a dry-run plan from an existing candidate or audit JSONL:
+
+```bash
+python scripts/run_local_mlip_validation.py \
+  --config configs/mlip_validation.example.json \
+  --candidate-index outputs/crystalformer_audit/BaTiO3/audit_candidates.jsonl \
+  --output-dir outputs/mlip_validation_dry_run
+```
+
+After a separate MLIP environment writes local result files, normalize them:
+
+```bash
+python scripts/normalize_offline_validation_results.py \
+  --input outputs/mlip_validation_mace/mace_validation_results.jsonl \
+  --input-format auto \
+  --output-jsonl outputs/offline_validation_normalized/validation_results.jsonl \
+  --output-summary outputs/offline_validation_normalized/normalization_summary.json \
+  --report outputs/offline_validation_normalized/report.md \
+  --candidate-index outputs/crystalformer_audit/BaTiO3/audit_candidates.jsonl
+```
+
+See `docs/setup/mlip_validation_workspace.md`. Without normalized and imported
+local evidence, F3 remains unavailable/unknown and no candidate should be
+reported as stable.
+
 ## CrystalFormer Bulk Generation
 
 Bulk orchestration is for existing-checkpoint CrystalFormer generation. It

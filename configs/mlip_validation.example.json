@@ -1,0 +1,15 @@
+{
+  "candidate_index": "outputs/crystalformer_audit/BaTiO3/audit_candidates.jsonl",
+  "output_dir": "outputs/mlip_validation_dry_run",
+  "validators": [
+    "mace_mpa_0",
+    "chgnet_0_3_0",
+    "matgl_m3gnet"
+  ],
+  "limit": null,
+  "notes": [
+    "This config is for dry-run planning only.",
+    "Do not install MLIP dependencies into fiir_crystal core.",
+    "Write real MLIP outputs to a separate outputs/mlip_validation_* directory, then normalize them."
+  ]
+}
