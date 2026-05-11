@@ -23,9 +23,10 @@ outputs under `outputs/`; those files are local artifacts and are not committed.
 
 ## Boundary
 
-This stage prepares and normalizes evidence only; it does not run MACE,
-CHGNet, MatGL, or any other validator from FIIR core:
+The `fiir_crystal` core package prepares and normalizes evidence only; it does
+not run MACE, CHGNet, MatGL, or any other validator:
 
+- the core package does not run MACE;
 - no MLIP execution inside FIIR core;
 - no DFT execution;
 - no model training;
@@ -164,3 +165,59 @@ python scripts/normalize_offline_validation_results.py \
 
 Then run the existing offline validation import check before any F3-aware audit
 or DPO handoff uses the evidence.
+
+## Local MACE Smoke Runner
+
+For a small local-only MACE inference smoke, use the optional script outside the
+core package. It reads existing candidate JSONL files and a local MACE model
+file, then writes local MLIP energy/force evidence. It does not generate new
+CrystalFormer candidates, train models, run DFT, call external APIs, or
+download models. To prevent implicit model download, pass a local model path or
+set `FIIR_MACE_MODEL_PATH`.
+
+Single-process dry-run:
+
+```bash
+python scripts/run_mace_offline_validation.py \
+  --candidates-jsonl outputs/crystalformer_bulk_gpu_smoke_perovskite_3x20/smoke/crystalformer_audit/BaTiO3/candidates.jsonl \
+  --output-jsonl outputs/mlip_validation_mace_smoke_dryrun/mace_validation_results.jsonl \
+  --output-summary outputs/mlip_validation_mace_smoke_dryrun/mace_validation_summary.json \
+  --report outputs/mlip_validation_mace_smoke_dryrun/report.md \
+  --limit 3 \
+  --dry-run
+```
+
+Policy-aware GPU smoke through the unified scheduler:
+
+```bash
+env \
+  FIIR_CONDA_ENV=matgalaxy \
+  FIIR_MACE_OUTPUT_DIR=outputs/mlip_validation_mace_gpu_smoke_BaTiO3_8 \
+  FIIR_MACE_CANDIDATES_JSONL=outputs/crystalformer_bulk_gpu_smoke_perovskite_3x20/smoke/crystalformer_audit/BaTiO3/candidates.jsonl \
+  FIIR_MACE_AUDIT_INDEX=outputs/crystalformer_bulk_gpu_smoke_perovskite_3x20/smoke/crystalformer_audit/BaTiO3/audit_candidates.jsonl \
+  FIIR_MACE_LIMIT=8 \
+  FIIR_MACE_DEVICE=cuda \
+  python scripts/slurm/plan_slurm_job.py \
+    --kind gpu \
+    --accelerator cuda \
+    --job-name fiir-mace-smoke \
+    --account hmt03 \
+    --time 00:10:00 \
+    --submit-script scripts/slurm/run_mace_offline_validation.slurm \
+    --output-json outputs/slurm_gpu_plans/mace_validation_smoke_submit_plan.json \
+    --run-sbatch
+```
+
+The SLURM wrapper uses `FIIR_TOTAL_GPUS` from the GPU scheduler as the default
+worker count, so a full 8-GPU RTX4090 node runs eight MACE workers. The
+normalized output is written under:
+
+```text
+outputs/mlip_validation_mace_gpu_smoke_BaTiO3_8/normalized/validation_results.jsonl
+```
+
+Important F3 boundary: this smoke runner does not compute a hull or compare
+against local reference phases. It leaves `energy_above_hull`, `formation_energy`,
+and `is_stable` as null. The output is MLIP energy/force evidence, not a stable
+F3 label. F3 remains unavailable until a local hull/reference workflow or other
+explicit offline validation evidence supplies `energy_above_hull` or `is_stable`.
