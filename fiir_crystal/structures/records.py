@@ -14,6 +14,7 @@ from typing import Any
 
 Vector3 = tuple[float, float, float]
 Matrix3 = tuple[Vector3, Vector3, Vector3]
+CRYSTALFORMER_SEQUENCE_FIELDS = ("g", "W", "A", "X", "L")
 
 
 @dataclass(slots=True)
@@ -160,6 +161,56 @@ class CrystalStructureRecord:
         if self.space_group is not None and not 1 <= self.space_group <= 230:
             errors.append("space_group_out_of_range")
         return errors
+
+    def crystalformer_sequence_status(self) -> tuple[str, list[str]]:
+        """Return raw CrystalFormer sequence completeness from metadata."""
+
+        return crystalformer_sequence_status(self.metadata)
+
+
+def crystalformer_sequence_status(metadata: dict[str, Any]) -> tuple[str, list[str]]:
+    """Classify preserved CrystalFormer `g` / `W` / `A` / `X` / `L` fields."""
+
+    if metadata.get("raw_sequence_status") and isinstance(metadata.get("missing_sequence_fields"), list):
+        return str(metadata["raw_sequence_status"]), [str(item) for item in metadata["missing_sequence_fields"]]
+
+    fields = metadata.get("raw_sequence_fields")
+    if not isinstance(fields, dict):
+        fields = {
+            field: metadata.get(f"raw_{field}")
+            for field in CRYSTALFORMER_SEQUENCE_FIELDS
+            if metadata.get(f"raw_{field}") is not None
+        }
+    missing = [
+        field
+        for field in CRYSTALFORMER_SEQUENCE_FIELDS
+        if _missing_sequence_value(fields.get(field)) and _missing_sequence_value(metadata.get(f"raw_{field}"))
+    ]
+    if len(missing) == len(CRYSTALFORMER_SEQUENCE_FIELDS):
+        return "missing", missing
+    if missing:
+        return "partial", missing
+    return "full", []
+
+
+def has_crystalformer_raw_sequence(metadata: dict[str, Any]) -> bool:
+    """Return whether metadata contains a DPO-usable raw CrystalFormer sequence."""
+
+    if metadata.get("raw_crystalformer_row") is not None:
+        return True
+    fields = metadata.get("raw_sequence_fields")
+    if isinstance(fields, dict) and any(
+        not _missing_sequence_value(fields.get(field)) for field in CRYSTALFORMER_SEQUENCE_FIELDS
+    ):
+        return True
+    return any(
+        not _missing_sequence_value(metadata.get(f"raw_{field}"))
+        for field in CRYSTALFORMER_SEQUENCE_FIELDS
+    )
+
+
+def _missing_sequence_value(value: Any) -> bool:
+    return value is None or value == "" or value == []
 
 
 def lattice_lengths(matrix: Matrix3 | tuple[()]) -> tuple[float, float, float] | None:

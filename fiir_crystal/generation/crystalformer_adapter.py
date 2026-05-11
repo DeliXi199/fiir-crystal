@@ -17,8 +17,10 @@ from typing import Any
 
 from fiir_crystal.structures import CrystalStructureRecord
 from fiir_crystal.structures.records import (
+    CRYSTALFORMER_SEQUENCE_FIELDS,
     Matrix3,
     composition_from_species,
+    crystalformer_sequence_status,
     lattice_matrix_from_parameters,
 )
 from fiir_crystal.structures.serialization import read_jsonl as read_structure_jsonl
@@ -87,7 +89,7 @@ class CrystalFormerAdapter:
     def _load_path(self, path: Path, source_format: str) -> list[CrystalStructureRecord]:
         if source_format in {"normalized_jsonl", "jsonl"}:
             target = _first_existing(path, ["candidates.jsonl", "normalized.jsonl"]) if path.is_dir() else path
-            return read_structure_jsonl(target)
+            return self._stamp_loaded_records(read_structure_jsonl(target), "normalized_jsonl")
         if source_format in {"crystalformer_raw_csv", "raw_csv", "sampling_csv"}:
             target = _first_csv(path) if path.is_dir() else path
             return self._load_sampling_csv(target)
@@ -108,7 +110,7 @@ class CrystalFormerAdapter:
             if path.name == "manifest.json":
                 return self._load_manifest(path)
             if path.suffix.lower() == ".jsonl":
-                return read_structure_jsonl(path)
+                return self._stamp_loaded_records(read_structure_jsonl(path), "normalized_jsonl")
             if path.suffix.lower() == ".csv":
                 return self._load_struct_csv(path) if _csv_looks_struct_like(path) else self._load_sampling_csv(path)
             if path.suffix.lower() == ".cif":
@@ -124,7 +126,7 @@ class CrystalFormerAdapter:
         for name in ("candidates.jsonl", "normalized.jsonl", "structures.jsonl"):
             candidate = path / name
             if candidate.exists():
-                return read_structure_jsonl(candidate)
+                return self._stamp_loaded_records(read_structure_jsonl(candidate), "normalized_jsonl")
 
         csv_files = sorted(path.glob("*.csv"))
         if csv_files:
@@ -158,6 +160,7 @@ class CrystalFormerAdapter:
                         raise ValueError(f"manifest {key} entries must be objects")
                     record = CrystalStructureRecord.from_dict(item)
                     record.metadata.setdefault("manifest_path", str(manifest_path))
+                    self._stamp_loaded_records([record], str(record.metadata.get("source_format", "normalized_jsonl")))
                     records.append(record)
 
         for key in ("normalized_output", "normalized_jsonl"):
@@ -187,7 +190,25 @@ class CrystalFormerAdapter:
                     raise ValueError("manifest files entries must be strings or objects")
 
         if not records and "candidate_id" in manifest:
-            records.append(CrystalStructureRecord.from_dict(manifest))
+            record = CrystalStructureRecord.from_dict(manifest)
+            self._stamp_loaded_records([record], str(record.metadata.get("source_format", "manifest")))
+            records.append(record)
+        return records
+
+    def _stamp_loaded_records(
+        self,
+        records: list[CrystalStructureRecord],
+        source_format: str,
+    ) -> list[CrystalStructureRecord]:
+        for index, record in enumerate(records, start=1):
+            _ensure_crystalformer_metadata_defaults(
+                record.metadata,
+                source_format=str(record.metadata.get("source_format", source_format)),
+                original_row_index=record.metadata.get("original_row_index", index),
+                config=self.config,
+                composition=record.composition,
+                space_group=record.space_group,
+            )
         return records
 
     def _load_sampling_csv(self, csv_path: Path) -> list[CrystalStructureRecord]:
@@ -230,6 +251,21 @@ class CrystalFormerAdapter:
         return [self._record_from_cif(path) for path in cif_paths]
 
     def _record_from_cif(self, path: Path) -> CrystalStructureRecord:
+        metadata: dict[str, Any] = {
+            "filename": path.name,
+            "suffix": path.suffix,
+            "source_format": "cif_directory",
+            "stability_mode": "unavailable_without_offline_validation",
+            "parse_status": "unparsed_cif",
+        }
+        _ensure_crystalformer_metadata_defaults(
+            metadata,
+            source_format="cif_directory",
+            original_row_index=None,
+            config=self.config,
+            composition=None,
+            space_group=None,
+        )
         return CrystalStructureRecord(
             candidate_id=path.stem,
             species=(),
@@ -243,12 +279,7 @@ class CrystalFormerAdapter:
             prototype=None,
             structure_ref=str(path),
             source=CRYSTALFORMER_SOURCE,
-            metadata={
-                "filename": path.name,
-                "suffix": path.suffix,
-                "source_format": "cif_directory",
-                "stability_mode": "unavailable_without_offline_validation",
-            },
+            metadata=metadata,
         )
 
     def _record_from_sampling_row(
@@ -265,6 +296,16 @@ class CrystalFormerAdapter:
         composition = _first_value(row, "composition", "formula", "target_formula")
         wyckoff = _parse_tokens(_first_value(row, "wyckoff_letters", "wyckoff", "W"))
         num_sites = _optional_int(_first_value(row, "num_sites", "num_atoms", "natoms"))
+        source_format = "crystalformer_raw_csv"
+        metadata = _metadata_from_crystalformer_row(
+            row=row,
+            index=index,
+            csv_path=csv_path,
+            source_format=source_format,
+            config=self.config,
+            composition=str(composition) if composition else composition_from_species(species),
+            space_group=_optional_int(_first_value(row, "space_group", "spacegroup", "sg", "g")),
+        )
         record = CrystalStructureRecord(
             candidate_id=str(candidate_id or f"crystalformer_{csv_path.stem}_{index:06d}"),
             species=species,
@@ -278,12 +319,7 @@ class CrystalFormerAdapter:
             prototype=_none_if_empty(_first_value(row, "prototype")),
             structure_ref=_none_if_empty(_first_value(row, "structure_ref")),
             source=CRYSTALFORMER_SOURCE,
-            metadata={
-                "raw_row": dict(row),
-                "csv_path": str(csv_path),
-                "source_format": "crystalformer_raw_csv",
-                "stability_mode": "unavailable_without_offline_validation",
-            },
+            metadata=metadata,
         )
         _copy_sampling_metadata(row, record.metadata)
         errors = record.validate_basic()
@@ -316,6 +352,124 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         raise FileNotFoundError(f"CrystalFormer CSV does not exist: {path}")
     with path.open("r", encoding="utf-8", newline="") as handle:
         return [dict(row) for row in csv.DictReader(handle)]
+
+
+def _metadata_from_crystalformer_row(
+    row: dict[str, str],
+    index: int,
+    csv_path: Path,
+    source_format: str,
+    config: dict[str, Any],
+    composition: str | None,
+    space_group: int | None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "raw_row": dict(row),
+        "raw_crystalformer_row": dict(row),
+        "csv_path": str(csv_path),
+        "source_format": source_format,
+        "stability_mode": "unavailable_without_offline_validation",
+    }
+    _ensure_crystalformer_metadata_defaults(
+        metadata,
+        source_format=source_format,
+        original_row_index=index,
+        config=config,
+        row=row,
+        composition=composition,
+        space_group=space_group,
+    )
+    return metadata
+
+
+def _ensure_crystalformer_metadata_defaults(
+    metadata: dict[str, Any],
+    source_format: str,
+    original_row_index: Any,
+    config: dict[str, Any],
+    row: dict[str, str] | None = None,
+    composition: str | None = None,
+    space_group: int | None = None,
+) -> None:
+    row = row or {}
+    raw_sequence_fields = {
+        field: _first_value(row, field) if row else metadata.get(f"raw_{field}")
+        for field in CRYSTALFORMER_SEQUENCE_FIELDS
+    }
+    existing_fields = metadata.get("raw_sequence_fields")
+    if isinstance(existing_fields, dict):
+        for field in CRYSTALFORMER_SEQUENCE_FIELDS:
+            if raw_sequence_fields[field] in (None, "") and existing_fields.get(field) not in (None, ""):
+                raw_sequence_fields[field] = existing_fields[field]
+
+    metadata.setdefault("raw_sequence_fields", raw_sequence_fields)
+    for field, value in raw_sequence_fields.items():
+        metadata.setdefault(f"raw_{field}", value)
+
+    status, missing = crystalformer_sequence_status(metadata)
+    metadata["raw_sequence_status"] = status
+    metadata["missing_sequence_fields"] = missing
+    metadata.setdefault("source_model", CRYSTALFORMER_SOURCE)
+    metadata.setdefault("source_checkpoint", _first_non_empty(
+        _first_value(row, "source_checkpoint", "restore_path", "checkpoint", "checkpoint_path"),
+        config.get("source_checkpoint"),
+        config.get("restore_path"),
+        config.get("checkpoint"),
+        config.get("checkpoint_path"),
+    ))
+    metadata.setdefault("formula_condition", _first_non_empty(
+        config.get("formula"),
+        _first_value(row, "formula_condition", "target_formula", "formula", "composition"),
+        composition,
+    ))
+    metadata.setdefault("spacegroup_condition", _first_non_empty(
+        config.get("spacegroup"),
+        _first_value(row, "spacegroup_condition", "target_spacegroup", "condition_spacegroup"),
+    ))
+    metadata.setdefault("temperature", _first_non_empty(
+        _first_value(row, "temperature", "sample_temperature", "sampling_temperature"),
+        config.get("temperature"),
+        config.get("sample_temperature"),
+        config.get("sampling_temperature"),
+    ))
+    k_value = _first_non_empty(
+        _first_value(row, "top_k", "K", "k"),
+        config.get("top_k"),
+        config.get("K"),
+    )
+    metadata.setdefault("top_k", k_value)
+    metadata.setdefault("K", _first_non_empty(_first_value(row, "K"), config.get("K"), k_value))
+    metadata.setdefault("original_row_index", original_row_index)
+    metadata["source_format"] = source_format
+    if space_group is not None:
+        metadata.setdefault("space_group", space_group)
+
+    sampling_metadata = dict(metadata.get("sampling_metadata", {}))
+    for key in (
+        "score",
+        "logprob",
+        "log_probability",
+        "temperature",
+        "sample_temperature",
+        "sampling_temperature",
+        "rank",
+        "top_k",
+        "K",
+    ):
+        value = _first_value(row, key) if row else metadata.get(key)
+        if value not in (None, ""):
+            sampling_metadata[key] = value
+    for key in ("temperature", "top_k", "K"):
+        if metadata.get(key) not in (None, ""):
+            sampling_metadata.setdefault(key, metadata[key])
+    metadata["sampling_metadata"] = sampling_metadata
+
+
+def _first_non_empty(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def _csv_looks_struct_like(path: Path) -> bool:

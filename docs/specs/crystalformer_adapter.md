@@ -20,5 +20,27 @@ user-provided `crystalformer_command` with `subprocess.run`. FIIR Crystal does
 not infer a CrystalFormer path, install dependencies, download checkpoints,
 download datasets, or train the model.
 
+The adapter preserves CrystalFormer-native sequence information for later DPO
+preference construction. `CrystalStructureRecord.metadata` includes:
+
+- `raw_crystalformer_row`
+- `raw_sequence_fields`
+- `raw_g`, `raw_W`, `raw_A`, `raw_X`, `raw_L`
+- `raw_sequence_status`
+- `missing_sequence_fields`
+- `sampling_metadata`
+- `source_model`
+- `source_checkpoint`
+- `formula_condition`
+- `spacegroup_condition`
+- `temperature`
+- `top_k` / `K`
+- `original_row_index`
+- `source_format`
+
+When only a struct CSV or CIF reference is available, the adapter records a
+clear `raw_sequence_status` such as `partial` or `missing` rather than silently
+pretending the native sequence is present.
+
 Sampling metadata such as `score`, `logprob`, `temperature`, and rank are stored
 under `metadata`. They are not treated as stability evidence.

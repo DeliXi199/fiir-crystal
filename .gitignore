@@ -8,3 +8,14 @@ dist/
 build/
 *.egg-info/
 outputs/
+external/CrystalFormer/.venv/
+external/CrystalFormer/outputs/
+external/CrystalFormer/checkpoints/
+external/CrystalFormer/wandb/
+external/CrystalFormer/runs/
+external/CrystalFormer/logs/
+external/checkpoints/
+outputs/crystalformer_raw/
+outputs/crystalformer_run/
+outputs/crystalformer_audit/
+outputs/dpo_preferences/

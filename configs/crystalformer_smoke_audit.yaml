@@ -1,0 +1,23 @@
+input:
+  input_dir: outputs/crystalformer_raw/BaTiO3
+  candidates_jsonl: null
+  source_format: auto
+
+condition:
+  mode: csp
+  formula: BaTiO3
+  spacegroup: null
+
+audit:
+  output_dir: outputs/crystalformer_audit/BaTiO3
+  parser_backend: none
+  stability_mode: unavailable_without_offline_validation
+  max_candidates: null
+  fail_on_zero_parsed: false
+
+notes:
+  scope: smoke_audit_only
+  dpo_training: false
+  dft: false
+  mlff_relaxation: false
+  external_api_calls: false

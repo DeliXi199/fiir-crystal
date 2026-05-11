@@ -1,0 +1,24 @@
+input:
+  audit_dir: outputs/crystalformer_audit/BaTiO3
+  audit_candidates_jsonl: outputs/crystalformer_audit/BaTiO3/audit_candidates.jsonl
+
+output:
+  preference_dir: outputs/dpo_preferences/BaTiO3
+  pairs_jsonl: outputs/dpo_preferences/BaTiO3/preference_pairs.jsonl
+
+condition:
+  mode: csp
+  formula: BaTiO3
+  spacegroup: null
+
+pairing:
+  same_formula_required: true
+  same_spacegroup_condition_required: true
+  require_raw_sequence: true
+  allowed_preference_types:
+    - geometry_chemistry_only
+
+boundary:
+  build_pairs_in_this_stage: false
+  train_dpo_in_this_stage: false
+  stability_preferences_require_offline_validation: true

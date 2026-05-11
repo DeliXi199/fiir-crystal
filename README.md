@@ -139,6 +139,51 @@ structures only; they are not relaxed stable materials. F3 stability remains
 unavailable or low-confidence unless offline validation, MLIP relaxation, or DFT
 results are imported.
 
+## CrystalFormer Workspace
+
+Use `deepmodeling/CrystalFormer` as an external workspace under
+`external/CrystalFormer/`. It may be a local clone for load-only generation
+runs, or a fork/submodule if later DPO training code changes need to be tracked.
+Checkpoints go under `external/checkpoints/`; generated files go under
+`outputs/crystalformer_raw/`, `outputs/crystalformer_run/`, and
+`outputs/crystalformer_audit/`. These artifacts are ignored by git.
+
+See `docs/setup/crystalformer_workspace.md` for clone/submodule commands and
+environment guidance. CrystalFormer, JAX, torch, pymatgen, and ASE are not core
+runtime dependencies of `fiir_crystal`; the core package remains stdlib-only.
+
+## Smoke Audit for CrystalFormer Outputs
+
+Run a smoke audit over real CrystalFormer output files:
+
+```bash
+python scripts/audit_crystalformer_outputs.py \
+  --input-dir outputs/crystalformer_raw/BaTiO3 \
+  --formula BaTiO3 \
+  --output-dir outputs/crystalformer_audit/BaTiO3 \
+  --parser-backend none \
+  --stability-mode unavailable_without_offline_validation
+```
+
+The audit writes `candidates.jsonl`, `audit_candidates.jsonl`,
+`audit_summary.json`, `failure_vectors.jsonl`, `error_audit_table.md`, and
+`report.md`. It records parse status, F1 geometry labels, F2 chemistry labels,
+F3 unknown/unavailable status, raw sequence preservation, and DPO eligibility.
+Without offline validation, F3 must not be reported as stable.
+
+## DPO Data Preparation Boundary
+
+This stage is not DPO training. The goal is to run the engineering loop:
+CrystalFormer output -> FIIR audit -> DPO eligibility marking.
+
+Future DPO preference pairs must come from the same formula and generation
+condition. If a spacegroup condition is specified, pairs must share it. Each
+pair must retain CrystalFormer-native `g` / `W` / `A` / `X` / `L` fields, or a
+documented equivalent raw sequence. Without F3 validation, future pairs can only
+represent geometry/chemistry preferences; they must not claim stability
+optimization. The schema is documented in
+`docs/specs/crystalformer_dpo_data_schema.md`.
+
 ## Output Files
 
 The configured runner writes:

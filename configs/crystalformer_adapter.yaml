@@ -3,7 +3,7 @@ generation:
   run_generation: false
   crystalformer_work_dir: external/CrystalFormer
   crystalformer_command: null
-  output_dir: outputs/external_crystalformer_raw
+  output_dir: outputs/crystalformer_raw/BaTiO3
   normalized_output: outputs/crystalformer_run/candidates.jsonl
   source_format: auto
 
