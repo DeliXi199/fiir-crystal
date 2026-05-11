@@ -14,7 +14,7 @@ import subprocess
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from string import Formatter
 from typing import Any, Sequence
@@ -866,7 +866,7 @@ def _duration_since(started: float) -> float:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _sum_optional_seconds(values: Any) -> float:
