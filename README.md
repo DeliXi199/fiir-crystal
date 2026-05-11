@@ -322,6 +322,28 @@ FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_10x400 \
 bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
+For a roughly three-hour, broader formula sweep, use the 32 formulas x 1600
+samples template. It produces 51200 generated structures and should be run with
+at most 16 concurrent CrystalFormer subprocesses so one node stays saturated
+without launching too many JAX processes:
+
+```bash
+FIIR_CONDA_ENV=crystalformer \
+FIIR_RUN_GENERATION=1 \
+FIIR_CONTINUE_ON_ERROR=1 \
+FIIR_EXPECTED_MINUTES=180 \
+FIIR_TIME_LIMIT=04:00:00 \
+FIIR_SKIP_EXISTING_MODE=no-skip \
+FIIR_MAX_CONCURRENT_GENERATIONS=16 \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_perovskite_32x1600_3h.example.json \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_32x1600_3h \
+bash scripts/slurm/submit_crystalformer_bulk.sh
+```
+
+With `FIIR_GENERATION_CPU_THREADS=auto`, the runner assigns all available node
+cores across those 16 subprocesses: 4 threads each on a 64-core node, or a
+3/4-thread mix on `regular`'s 56 cores.
+
 For longer jobs, monitor `squeue` plus the corresponding `logs/slurm/` stdout
 and stderr through the startup monitor:
 
