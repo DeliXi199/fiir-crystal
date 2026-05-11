@@ -130,6 +130,28 @@ def test_real_perovskite_3x20_example_config_validate_only_is_template_safe(tmp_
     assert [item["formula"] for item in summary["items"]] == ["BaTiO3", "SrTiO3", "CaTiO3"]
 
 
+def test_real_perovskite_10x20_example_config_validate_only_is_template_safe(tmp_path) -> None:
+    output_root = tmp_path / "real_perovskite_10x20_validate"
+
+    result = main(
+        [
+            "--config",
+            "configs/crystalformer_bulk_generation.real_perovskite_10x20.example.json",
+            "--output-root",
+            str(output_root),
+            "--validate-only",
+        ]
+    )
+
+    summary = result["summary"]
+    assert summary["validate_only"] is True
+    assert summary["formula_count"] == 10
+    assert summary["total_num_samples"] == 200
+    assert [item["num_samples"] for item in summary["items"]] == [20] * 10
+    assert summary["items"][0]["formula"] == "BaTiO3"
+    assert summary["items"][-1]["formula"] == "PbTiO3"
+
+
 def test_validate_only_reports_missing_referenced_checkpoint_as_blocking(tmp_path) -> None:
     work_dir = tmp_path / "CrystalFormer"
     work_dir.mkdir()
@@ -213,12 +235,21 @@ def test_bulk_generation_run_generation_executes_fake_and_smoke(tmp_path) -> Non
     assert summary["status_counts"] == {"succeeded": 2}
     assert summary["total_candidates"] == 4
     assert summary["total_dpo_eligible"] == 4
+    assert summary["timing"]["total_wall_seconds"] >= 0
+    assert summary["timing"]["generation_seconds_total"] >= 0
+    assert summary["timing"]["smoke_seconds_total"] >= 0
+    assert summary["items"][0]["generation_duration_seconds"] >= 0
+    assert summary["items"][0]["smoke_duration_seconds"] >= 0
+    assert summary["items"][0]["total_duration_seconds"] >= 0
     assert (output_root / "crystalformer_raw" / "BaTiO3" / "samples.csv").exists()
     provenance = json.loads(
         (output_root / "formula_runs" / "BaTiO3" / "generation_provenance.json").read_text(encoding="utf-8")
     )
     assert provenance["executed"] is True
     assert provenance["returncode"] == 0
+    assert provenance["duration_seconds"] >= 0
+    assert provenance["started_at_utc"]
+    assert provenance["ended_at_utc"]
     assert "wrote fake CrystalFormer raw output" in provenance["stdout"]
 
 

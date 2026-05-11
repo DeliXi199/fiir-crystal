@@ -11,8 +11,10 @@ import json
 import os
 import shlex
 import subprocess
+import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from string import Formatter
 from typing import Any, Sequence
@@ -151,6 +153,7 @@ def run_crystalformer_bulk_generation(
 ) -> dict[str, Any]:
     """Run a bulk plan, optionally executing generation commands."""
 
+    run_started = time.perf_counter()
     cfg = _with_output_override(config, output_root)
     skip_existing_effective = cfg.skip_existing if skip_existing is None else skip_existing
     plan = build_bulk_plan(cfg, only_formula=only_formula, skip_existing=skip_existing_effective)
@@ -189,7 +192,14 @@ def run_crystalformer_bulk_generation(
             if row["status"] == "failed" and not continue_on_error:
                 break
 
-    summary = _bulk_summary(cfg, plan, rows, run_generation=run_generation, parallelism=parallelism)
+    summary = _bulk_summary(
+        cfg,
+        plan,
+        rows,
+        run_generation=run_generation,
+        parallelism=parallelism,
+        total_wall_seconds=_duration_since(run_started),
+    )
     files = {
         "plan": str(cfg.output_root / "bulk_plan.json"),
         "summary": str(cfg.output_root / "bulk_summary.json"),
@@ -250,6 +260,7 @@ def _run_plan_item(
     run_generation: bool,
     continue_on_error: bool,
 ) -> dict[str, Any]:
+    item_started = time.perf_counter()
     formula = str(item["formula"])
     formula_dir = config.output_root / "formula_runs" / formula
     formula_dir.mkdir(parents=True, exist_ok=True)
@@ -261,6 +272,9 @@ def _run_plan_item(
         "provenance": str(provenance_path),
         "status": "planned",
         "generation_returncode": None,
+        "generation_duration_seconds": None,
+        "smoke_duration_seconds": None,
+        "total_duration_seconds": None,
         "smoke_summary": None,
         "error": None,
     }
@@ -272,18 +286,21 @@ def _run_plan_item(
     elif run_generation:
         generation = _execute_generation(item)
         row["generation_returncode"] = generation["returncode"]
+        row["generation_duration_seconds"] = generation["duration_seconds"]
         if generation["returncode"] != 0:
             row["status"] = "failed"
             row["error"] = f"generation_failed_returncode_{generation['returncode']}"
             write_json(provenance_path, generation)
             if continue_on_error:
-                return row
-            return row
+                return _finish_row_timing(row, item_started)
+            return _finish_row_timing(row, item_started)
     write_json(provenance_path, generation)
+    row["generation_duration_seconds"] = generation["duration_seconds"]
 
     if not run_generation and not item["skip_existing"]:
-        return row
+        return _finish_row_timing(row, item_started)
 
+    smoke_started = time.perf_counter()
     try:
         smoke_result = run_crystalformer_smoke_pipeline(
             CrystalFormerSmokePipelineConfig(
@@ -307,7 +324,9 @@ def _run_plan_item(
     except Exception as exc:
         row["status"] = "failed"
         row["error"] = f"{exc.__class__.__name__}: {exc}"
-    return row
+    finally:
+        row["smoke_duration_seconds"] = _duration_since(smoke_started)
+    return _finish_row_timing(row, item_started)
 
 
 def _run_plan_items_parallel(
@@ -363,6 +382,9 @@ def _exception_row(item: dict[str, Any], exc: Exception) -> dict[str, Any]:
         "provenance": None,
         "status": "failed",
         "generation_returncode": None,
+        "generation_duration_seconds": None,
+        "smoke_duration_seconds": None,
+        "total_duration_seconds": None,
         "smoke_summary": None,
         "error": f"{exc.__class__.__name__}: {exc}",
     }
@@ -375,6 +397,7 @@ def _bulk_summary(
     *,
     run_generation: bool,
     parallelism: dict[str, Any],
+    total_wall_seconds: float,
 ) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     total_candidates = 0
@@ -396,6 +419,7 @@ def _bulk_summary(
         "train_dpo": False,
         "run_generation": run_generation,
         "parallelism": parallelism,
+        "timing": _bulk_timing_summary(rows, total_wall_seconds=total_wall_seconds),
         "formula_count": len(plan),
         "completed_formula_count": len(rows),
         "status_counts": dict(sorted(status_counts.items())),
@@ -522,6 +546,7 @@ def _render_bulk_report(summary: dict[str, Any]) -> str:
         "",
         "## Summary",
         f"- parallelism: {summary['parallelism']}",
+        f"- timing: {summary['timing']}",
         f"- formula_count: {summary['formula_count']}",
         f"- completed_formula_count: {summary['completed_formula_count']}",
         f"- status_counts: {summary['status_counts']}",
@@ -533,6 +558,31 @@ def _render_bulk_report(summary: dict[str, Any]) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _bulk_timing_summary(
+    rows: Sequence[dict[str, Any]],
+    *,
+    total_wall_seconds: float,
+) -> dict[str, Any]:
+    generation_seconds = _sum_optional_seconds(row.get("generation_duration_seconds") for row in rows)
+    smoke_seconds = _sum_optional_seconds(row.get("smoke_duration_seconds") for row in rows)
+    formula_seconds = _sum_optional_seconds(row.get("total_duration_seconds") for row in rows)
+    formula_durations = [
+        float(row["total_duration_seconds"])
+        for row in rows
+        if row.get("total_duration_seconds") is not None
+    ]
+    return {
+        "total_wall_seconds": total_wall_seconds,
+        "generation_seconds_total": generation_seconds,
+        "smoke_seconds_total": smoke_seconds,
+        "formula_seconds_total": formula_seconds,
+        "max_formula_seconds": max(formula_durations) if formula_durations else None,
+        "average_formula_seconds": (
+            formula_seconds / len(formula_durations) if formula_durations else None
+        ),
+    }
 
 
 def _resolve_parallelism(
@@ -663,6 +713,8 @@ def _template_fields(template: str) -> list[str]:
 
 
 def _execute_generation(item: dict[str, Any]) -> dict[str, Any]:
+    started_at = _utc_now_iso()
+    started = time.perf_counter()
     work_dir = Path(str(item["work_dir"]))
     if not work_dir.exists():
         return _generation_provenance(
@@ -670,6 +722,9 @@ def _execute_generation(item: dict[str, Any]) -> dict[str, Any]:
             executed=False,
             reason=f"work_dir_missing:{work_dir}",
             returncode=127,
+            duration_seconds=_duration_since(started),
+            started_at_utc=started_at,
+            ended_at_utc=_utc_now_iso(),
         )
     args = shlex.split(str(item["command"]))
     env_overrides = _generation_env_overrides(item)
@@ -693,6 +748,9 @@ def _execute_generation(item: dict[str, Any]) -> dict[str, Any]:
         stderr=completed.stderr,
         args=args,
         env_overrides=env_overrides,
+        duration_seconds=_duration_since(started),
+        started_at_utc=started_at,
+        ended_at_utc=_utc_now_iso(),
     )
 
 
@@ -706,6 +764,9 @@ def _generation_provenance(
     stderr: str | None = None,
     args: list[str] | None = None,
     env_overrides: dict[str, str] | None = None,
+    duration_seconds: float = 0.0,
+    started_at_utc: str | None = None,
+    ended_at_utc: str | None = None,
 ) -> dict[str, Any]:
     return {
         "formula": item["formula"],
@@ -715,6 +776,9 @@ def _generation_provenance(
         "args": args,
         "cwd": item["work_dir"],
         "returncode": returncode,
+        "started_at_utc": started_at_utc,
+        "ended_at_utc": ended_at_utc,
+        "duration_seconds": duration_seconds,
         "stdout": stdout,
         "stderr": stderr,
         "raw_output_dir": item["raw_output_dir"],
@@ -790,6 +854,28 @@ def _with_output_override(
 
 def _absolute_path(path: Path) -> str:
     return str(path if path.is_absolute() else path.resolve())
+
+
+def _finish_row_timing(row: dict[str, Any], started: float) -> dict[str, Any]:
+    row["total_duration_seconds"] = _duration_since(started)
+    return row
+
+
+def _duration_since(started: float) -> float:
+    return round(time.perf_counter() - started, 6)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _sum_optional_seconds(values: Any) -> float:
+    total = 0.0
+    for value in values:
+        if value is None:
+            continue
+        total += float(value)
+    return round(total, 6)
 
 
 def _merge_counts(target: dict[str, int], incoming: Any) -> None:

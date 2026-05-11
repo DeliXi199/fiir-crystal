@@ -87,6 +87,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     print("CrystalFormer bulk generation orchestration complete")
     print(f"  run_generation: {summary['run_generation']}")
     print(f"  parallelism: {summary['parallelism']}")
+    print(f"  timing: {summary['timing']}")
     print(f"  formula_count: {summary['formula_count']}")
     print(f"  completed_formula_count: {summary['completed_formula_count']}")
     print(f"  status_counts: {summary['status_counts']}")
