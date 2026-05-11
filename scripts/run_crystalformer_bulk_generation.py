@@ -33,6 +33,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-concurrent-generations", type=int)
     parser.add_argument("--generation-cpu-threads", type=int)
     parser.add_argument("--total-cpu-cores", type=int)
+    parser.add_argument("--total-gpus", type=int)
+    parser.add_argument(
+        "--gpu-devices",
+        help="Comma-separated CUDA_VISIBLE_DEVICES tokens to assign one per concurrent generation worker.",
+    )
     return parser.parse_args(argv)
 
 
@@ -67,6 +72,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                 max_concurrent_generations=args.max_concurrent_generations,
                 generation_cpu_threads=args.generation_cpu_threads,
                 total_cpu_cores=args.total_cpu_cores,
+                total_gpus=args.total_gpus,
+                gpu_devices=args.gpu_devices,
             )
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc

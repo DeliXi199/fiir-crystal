@@ -92,6 +92,11 @@ For GPU runs, follow the JAX/CUDA installation instructions that match the
 local driver and CUDA version. FIIR Crystal does not install CUDA packages or
 manage the CrystalFormer environment.
 
+On the current SLURM GPU nodes, the local `crystalformer` environment should
+report a JAX `gpu` backend before any GPU generation is attempted. The
+repository includes a guarded GPU submitter that checks this at job startup and
+exits before orchestration if JAX cannot see CUDA devices.
+
 ## Small Batch Generation Example
 
 Run this from `external/CrystalFormer` after placing a checkpoint directory
@@ -256,6 +261,34 @@ FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_perovskite_3x20.exam
 FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_3x20 \
 bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
+
+If CUDA-enabled JAX is configured, use the GPU submitter instead of the CPU
+submitter. The default behavior is still plan-only; validation and generation
+remain explicit:
+
+```bash
+FIIR_VALIDATE_ONLY=1 \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real.example.json \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_gpu_validate \
+bash scripts/slurm/submit_crystalformer_bulk_gpu.sh
+```
+
+For a first GPU smoke generation:
+
+```bash
+FIIR_RUN_GENERATION=1 \
+FIIR_ONLY_FORMULA=BaTiO3 \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real.example.json \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_gpu_smoke_BaTiO3 \
+bash scripts/slurm/submit_crystalformer_bulk_gpu.sh
+```
+
+The GPU submitter uses the unified GPU scheduler to choose the node with the
+best remaining weighted GPU, CPU, and memory capacity. It requests the selected
+node's available GPUs and CPU cores, exports `FIIR_TOTAL_GPUS` and
+`CUDA_VISIBLE_DEVICES`, and the bulk runner assigns one CUDA device to each
+concurrent CrystalFormer subprocess while dividing CPU threads across those
+workers. It does not run DFT, MLIP, training, downloads, or external API calls.
 
 Once that passes, the next small batch is 10 perovskite-like formulas x 20
 samples:

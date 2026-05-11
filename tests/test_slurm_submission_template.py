@@ -18,11 +18,18 @@ def test_crystalformer_bulk_slurm_template_is_safe_by_default() -> None:
     assert 'FIIR_RUN_GENERATION="${FIIR_RUN_GENERATION:-0}"' in text
     assert "--run-generation" in text
     assert 'FIIR_TOTAL_CPU_CORES="${FIIR_TOTAL_CPU_CORES:-}"' in text
+    assert 'FIIR_TOTAL_GPUS="${FIIR_TOTAL_GPUS:-}"' in text
+    assert 'FIIR_GPU_DEVICES="${FIIR_GPU_DEVICES:-${CUDA_VISIBLE_DEVICES:-}}"' in text
+    assert 'FIIR_REQUIRE_JAX_GPU="${FIIR_REQUIRE_JAX_GPU:-0}"' in text
     assert 'FIIR_MAX_CONCURRENT_GENERATIONS="${FIIR_MAX_CONCURRENT_GENERATIONS:-auto}"' in text
     assert 'FIIR_GENERATION_CPU_THREADS="${FIIR_GENERATION_CPU_THREADS:-auto}"' in text
     assert "--total-cpu-cores" in text
+    assert "--total-gpus" in text
+    assert "--gpu-devices" in text
     assert "--max-concurrent-generations" in text
     assert "--generation-cpu-threads" in text
+    assert "jax_default_backend" in text
+    assert "JAX default backend is not gpu" in text
     assert 'conda activate "${FIIR_CONDA_ENV}"' in text
     assert 'source "${FIIR_VENV}/bin/activate"' in text
     assert text.count("set +u") >= 2
@@ -56,6 +63,26 @@ def test_crystalformer_policy_submitter_encodes_partition_order() -> None:
     assert '--error "${FIIR_SLURM_LOG_DIR}/%x_%j.err"' in text
     assert "monitor_slurm_startup.sh --job-id" in text
     assert "Submitted batch job" in text
+
+
+def test_crystalformer_gpu_submitter_uses_unified_gpu_policy() -> None:
+    script = Path("scripts/slurm/submit_crystalformer_bulk_gpu.sh")
+    text = script.read_text(encoding="utf-8")
+
+    assert "--kind" in text
+    assert '"gpu"' in text
+    assert "FIIR_GPU_PARTITIONS" in text
+    assert "gpu4090_8" in text
+    assert "FIIR_GPU_ACCELERATOR" in text
+    assert "FIIR_SLURM_ACCOUNT" in text
+    assert "hmt03" in text
+    assert "FIIR_CONDA_ENV" in text
+    assert "crystalformer" in text
+    assert "FIIR_REQUIRE_JAX_GPU" in text
+    assert "XLA_PYTHON_CLIENT_PREALLOCATE" in text
+    assert "--run-sbatch" in text
+    assert "FIIR_DRY_RUN" in text
+    assert "monitor_slurm_startup.sh --job-id" in text
 
 
 def test_unified_slurm_planner_cli_exists() -> None:

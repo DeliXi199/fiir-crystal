@@ -396,6 +396,47 @@ def test_bulk_generation_auto_parallelism_uses_total_cpu_budget(tmp_path) -> Non
         assert "intra_op_parallelism_threads=2" in provenance["env_overrides"]["XLA_FLAGS"]
 
 
+def test_bulk_generation_gpu_parallelism_assigns_cuda_devices(tmp_path) -> None:
+    config = _config(tmp_path)
+    output_root = tmp_path / "gpu_parallel"
+
+    result = main(
+        [
+            "--config",
+            str(config),
+            "--output-root",
+            str(output_root),
+            "--run-generation",
+            "--no-skip-existing",
+            "--total-cpu-cores",
+            "8",
+            "--total-gpus",
+            "2",
+            "--gpu-devices",
+            "4,5",
+        ]
+    )
+
+    summary = result["summary"]
+    assert summary["status_counts"] == {"succeeded": 2}
+    assert summary["parallelism"]["max_concurrent_generations"] == 2
+    assert summary["parallelism"]["thread_allocations"] == [4, 4]
+    assert summary["parallelism"]["gpu_devices"] == ["4", "5"]
+    assert summary["parallelism"]["gpu_device_assignments"] == ["4", "5"]
+    for formula, expected_device in (("BaTiO3", "4"), ("SrTiO3", "5")):
+        provenance = json.loads(
+            (output_root / "formula_runs" / formula / "generation_provenance.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert provenance["generation_cpu_threads"] == 4
+        assert provenance["generation_gpu_device"] == expected_device
+        assert provenance["env_overrides"]["CUDA_VISIBLE_DEVICES"] == expected_device
+        assert provenance["env_overrides"]["JAX_PLATFORMS"] == "cuda"
+        assert provenance["env_overrides"]["XLA_PYTHON_CLIENT_PREALLOCATE"] == "false"
+        assert "intra_op_parallelism_threads=4" in provenance["env_overrides"]["XLA_FLAGS"]
+
+
 def test_bulk_generation_only_formula(tmp_path) -> None:
     config = _config(tmp_path)
     output_root = tmp_path / "only"

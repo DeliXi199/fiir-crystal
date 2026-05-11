@@ -20,6 +20,9 @@
 #   FIIR_CONDA_ENV=crystalformer
 #   FIIR_MAX_CONCURRENT_GENERATIONS=auto
 #   FIIR_GENERATION_CPU_THREADS=auto
+#   FIIR_TOTAL_GPUS=8
+#   FIIR_GPU_DEVICES=0,1,2,3,4,5,6,7
+#   FIIR_REQUIRE_JAX_GPU=1
 #   FIIR_MODULES="cuda/12.1"
 #
 #SBATCH --account=hmt03
@@ -87,6 +90,9 @@ FIIR_RUN_GENERATION="${FIIR_RUN_GENERATION:-0}"
 FIIR_CONTINUE_ON_ERROR="${FIIR_CONTINUE_ON_ERROR:-0}"
 FIIR_SKIP_EXISTING_MODE="${FIIR_SKIP_EXISTING_MODE:-default}"
 FIIR_TOTAL_CPU_CORES="${FIIR_TOTAL_CPU_CORES:-}"
+FIIR_TOTAL_GPUS="${FIIR_TOTAL_GPUS:-}"
+FIIR_GPU_DEVICES="${FIIR_GPU_DEVICES:-${CUDA_VISIBLE_DEVICES:-}}"
+FIIR_REQUIRE_JAX_GPU="${FIIR_REQUIRE_JAX_GPU:-0}"
 FIIR_MAX_CONCURRENT_GENERATIONS="${FIIR_MAX_CONCURRENT_GENERATIONS:-auto}"
 FIIR_GENERATION_CPU_THREADS="${FIIR_GENERATION_CPU_THREADS:-auto}"
 
@@ -100,9 +106,30 @@ if [ -z "${FIIR_TOTAL_CPU_CORES}" ]; then
 fi
 echo "Computed ncpu=${ncpu}"
 echo "FIIR_TOTAL_CPU_CORES=${FIIR_TOTAL_CPU_CORES}"
+echo "FIIR_TOTAL_GPUS=${FIIR_TOTAL_GPUS:-none}"
+echo "FIIR_GPU_DEVICES=${FIIR_GPU_DEVICES:-none}"
 echo "FIIR_MAX_CONCURRENT_GENERATIONS=${FIIR_MAX_CONCURRENT_GENERATIONS}"
 echo "FIIR_GENERATION_CPU_THREADS=${FIIR_GENERATION_CPU_THREADS}"
 echo "CrystalFormer bulk orchestration starts at $(date)"
+
+if [ "${FIIR_REQUIRE_JAX_GPU}" = "1" ] || [ "${FIIR_REQUIRE_JAX_GPU}" = "true" ]; then
+  echo "FIIR_REQUIRE_JAX_GPU is enabled; checking JAX CUDA backend before orchestration."
+  "${FIIR_PYTHON}" - <<'PY'
+import jax
+import jaxlib
+
+backend = jax.default_backend()
+devices = jax.devices()
+print(f"jax={jax.__version__}")
+print(f"jaxlib={jaxlib.__version__}")
+print(f"jax_default_backend={backend}")
+print(f"jax_devices={devices}")
+if backend != "gpu":
+    raise SystemExit("JAX default backend is not gpu")
+if not any(getattr(device, "platform", "") == "gpu" for device in devices):
+    raise SystemExit("JAX did not report any GPU devices")
+PY
+fi
 
 cmd=(
   "${FIIR_PYTHON}"
@@ -114,6 +141,14 @@ cmd=(
   "--total-cpu-cores"
   "${FIIR_TOTAL_CPU_CORES}"
 )
+
+if [ -n "${FIIR_TOTAL_GPUS}" ]; then
+  cmd+=("--total-gpus" "${FIIR_TOTAL_GPUS}")
+fi
+
+if [ -n "${FIIR_GPU_DEVICES}" ]; then
+  cmd+=("--gpu-devices" "${FIIR_GPU_DEVICES}")
+fi
 
 if [ "${FIIR_MAX_CONCURRENT_GENERATIONS}" != "auto" ]; then
   cmd+=("--max-concurrent-generations" "${FIIR_MAX_CONCURRENT_GENERATIONS}")

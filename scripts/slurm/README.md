@@ -48,6 +48,45 @@ FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real.example.json \
 bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
+## CrystalFormer GPU Submitter
+
+When the `crystalformer` environment has CUDA-enabled JAX, use the GPU
+submitter to route bulk CrystalFormer jobs through the same unified scheduler:
+
+```bash
+FIIR_VALIDATE_ONLY=1 \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_gpu_validate \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real.example.json \
+bash scripts/slurm/submit_crystalformer_bulk_gpu.sh
+```
+
+The GPU submitter is also safe by default: without `FIIR_RUN_GENERATION=1`, the
+job only writes a bulk plan or validation summary. It exports
+`FIIR_CONDA_ENV=crystalformer`, requires a JAX GPU backend by default, requests
+all currently free GPUs and CPU cores on the selected node, and passes
+`FIIR_TOTAL_GPUS` plus `CUDA_VISIBLE_DEVICES` into the bulk runner. The runner
+then assigns one visible CUDA device per concurrent CrystalFormer subprocess
+and divides the selected CPU cores across those subprocesses.
+
+After validation is clean, run a small explicit GPU generation:
+
+```bash
+FIIR_RUN_GENERATION=1 \
+FIIR_ONLY_FORMULA=BaTiO3 \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_gpu_smoke \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real.example.json \
+bash scripts/slurm/submit_crystalformer_bulk_gpu.sh
+```
+
+Useful GPU submitter overrides:
+
+- `FIIR_GPU_PARTITIONS`: comma- or space-separated GPU partitions, default `gpu4090_8`.
+- `FIIR_GPU_ACCELERATOR`: `cuda` or `any`, default `cuda`.
+- `FIIR_GPU_MIN_GPUS`, `FIIR_GPU_MIN_CPUS`, `FIIR_GPU_MIN_MEMORY_MB`: minimum remaining resources.
+- `FIIR_SLURM_ACCOUNT`: account passed to `sbatch`, default `hmt03`.
+- `FIIR_REQUIRE_JAX_GPU`: set to `0` only for dry debugging without a GPU backend.
+- `FIIR_GPU_PLAN_JSON`: path for the deterministic GPU scheduling plan.
+
 For multi-node generation, submit independent one-node shard configs. The
 checked-in perovskite 128 bank is split into four 32-formula shard configs:
 

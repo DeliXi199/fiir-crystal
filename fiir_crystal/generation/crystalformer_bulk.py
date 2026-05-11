@@ -150,6 +150,8 @@ def run_crystalformer_bulk_generation(
     max_concurrent_generations: int | None = None,
     generation_cpu_threads: int | None = None,
     total_cpu_cores: int | None = None,
+    total_gpus: int | None = None,
+    gpu_devices: str | None = None,
 ) -> dict[str, Any]:
     """Run a bulk plan, optionally executing generation commands."""
 
@@ -163,6 +165,8 @@ def run_crystalformer_bulk_generation(
         max_concurrent_generations=max_concurrent_generations,
         generation_cpu_threads=generation_cpu_threads,
         total_cpu_cores=total_cpu_cores,
+        total_gpus=total_gpus,
+        gpu_devices=gpu_devices,
     )
     plan = _annotate_plan_parallelism(plan, parallelism)
     cfg.output_root.mkdir(parents=True, exist_ok=True)
@@ -592,13 +596,20 @@ def _resolve_parallelism(
     max_concurrent_generations: int | None,
     generation_cpu_threads: int | None,
     total_cpu_cores: int | None,
+    total_gpus: int | None,
+    gpu_devices: str | None,
 ) -> dict[str, Any]:
+    total_gpu_count = _positive_int_or_none(total_gpus)
+    gpu_device_tokens = _parse_gpu_device_tokens(gpu_devices, total_gpu_count)
     plan_count = len(plan)
     if not run_generation or plan_count == 0:
         return {
             "max_concurrent_generations": 1,
             "generation_cpu_threads": None,
             "total_cpu_cores": total_cpu_cores,
+            "total_gpus": total_gpu_count,
+            "gpu_devices": gpu_device_tokens,
+            "gpu_device_assignments": [],
             "thread_allocations": [],
             "parallel_core_budget": 0,
         }
@@ -607,7 +618,14 @@ def _resolve_parallelism(
     total_cores = _positive_int_or_none(total_cpu_cores)
     fixed_threads = _positive_int_or_none(generation_cpu_threads)
     if requested_workers is None:
-        requested_workers = plan_count if total_cores is not None else 1
+        if gpu_device_tokens:
+            requested_workers = len(gpu_device_tokens)
+        elif total_gpu_count is not None:
+            requested_workers = total_gpu_count
+        elif total_cores is not None:
+            requested_workers = plan_count
+        else:
+            requested_workers = 1
     workers = max(1, min(plan_count, requested_workers))
 
     if fixed_threads is not None:
@@ -623,6 +641,14 @@ def _resolve_parallelism(
         "max_concurrent_generations": workers,
         "generation_cpu_threads": fixed_threads,
         "total_cpu_cores": total_cores,
+        "total_gpus": total_gpu_count,
+        "gpu_devices": gpu_device_tokens,
+        "gpu_device_assignments": [
+            gpu_device_tokens[index % len(gpu_device_tokens)]
+            for index in range(workers)
+        ]
+        if gpu_device_tokens
+        else [],
         "thread_allocations": allocations,
         "parallel_core_budget": sum(allocations),
     }
@@ -633,14 +659,19 @@ def _annotate_plan_parallelism(
     parallelism: dict[str, Any],
 ) -> list[dict[str, Any]]:
     allocations = list(parallelism.get("thread_allocations") or [])
-    if not allocations:
+    gpu_assignments = list(parallelism.get("gpu_device_assignments") or [])
+    if not allocations and not gpu_assignments:
         return [dict(item) for item in plan]
     rows = []
     for index, item in enumerate(plan):
-        slot = index % len(allocations)
+        slot_count = len(allocations) or len(gpu_assignments)
+        slot = index % slot_count
         row = dict(item)
         row["generation_slot"] = slot
-        row["generation_cpu_threads"] = allocations[slot]
+        if allocations:
+            row["generation_cpu_threads"] = allocations[slot]
+        if gpu_assignments:
+            row["generation_gpu_device"] = gpu_assignments[slot]
         rows.append(row)
     return rows
 
@@ -785,6 +816,7 @@ def _generation_provenance(
         "env_overrides": env_overrides or {},
         "generation_slot": item.get("generation_slot"),
         "generation_cpu_threads": item.get("generation_cpu_threads"),
+        "generation_gpu_device": item.get("generation_gpu_device"),
     }
 
 
@@ -813,18 +845,34 @@ def _checkpoint_files(path: Path) -> list[str]:
 
 def _generation_env_overrides(item: dict[str, Any]) -> dict[str, str]:
     threads = _positive_int_or_none(item.get("generation_cpu_threads"))
-    if threads is None:
-        return {}
-    overrides = {
-        "OMP_NUM_THREADS": str(threads),
-        "MKL_NUM_THREADS": str(threads),
-        "OPENBLAS_NUM_THREADS": str(threads),
-        "NUMEXPR_NUM_THREADS": str(threads),
-    }
-    xla_flags = os.environ.get("XLA_FLAGS", "").strip()
-    cpu_flags = f"--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads={threads}"
-    overrides["XLA_FLAGS"] = f"{xla_flags} {cpu_flags}".strip()
+    gpu_device = str(item.get("generation_gpu_device") or "").strip()
+    overrides = {}
+    if threads is not None:
+        overrides.update(
+            {
+                "OMP_NUM_THREADS": str(threads),
+                "MKL_NUM_THREADS": str(threads),
+                "OPENBLAS_NUM_THREADS": str(threads),
+                "NUMEXPR_NUM_THREADS": str(threads),
+            }
+        )
+        xla_flags = os.environ.get("XLA_FLAGS", "").strip()
+        cpu_flags = f"--xla_cpu_multi_thread_eigen=true intra_op_parallelism_threads={threads}"
+        overrides["XLA_FLAGS"] = f"{xla_flags} {cpu_flags}".strip()
+    if gpu_device:
+        overrides["CUDA_VISIBLE_DEVICES"] = gpu_device
+        overrides["JAX_PLATFORMS"] = os.environ.get("JAX_PLATFORMS", "cuda")
+        if "XLA_PYTHON_CLIENT_PREALLOCATE" not in os.environ:
+            overrides["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
     return overrides
+
+
+def _parse_gpu_device_tokens(gpu_devices: str | None, total_gpus: int | None) -> list[str]:
+    if gpu_devices:
+        return [token.strip() for token in gpu_devices.split(",") if token.strip()]
+    if total_gpus is None:
+        return []
+    return [str(index) for index in range(total_gpus)]
 
 
 def _with_output_override(
