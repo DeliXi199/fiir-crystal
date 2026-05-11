@@ -235,6 +235,18 @@ python scripts/run_crystalformer_bulk_generation.py \
   --run-generation
 ```
 
+If the 5-sample run succeeds, the next conservative scale-up is the 20-sample
+BaTiO3 template:
+
+```bash
+FIIR_CONDA_ENV=crystalformer \
+FIIR_RUN_GENERATION=1 \
+FIIR_ONLY_FORMULA=BaTiO3 \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_batio3_n20.example.json \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_BaTiO3_n20 \
+sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
+```
+
 The default checked-in config uses a fake stdlib-only generator. The real
 example config keeps `num_samples` small and assumes a prepared external
 CrystalFormer workspace plus checkpoint. Use `--only-formula BaTiO3` for a

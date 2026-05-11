@@ -271,6 +271,19 @@ python scripts/run_crystalformer_bulk_generation.py \
   --run-generation
 ```
 
+After the 5-sample smoke succeeds, use the checked-in 20-sample BaTiO3
+template to verify that preference artifacts become non-empty before moving to
+larger batches:
+
+```bash
+FIIR_CONDA_ENV=crystalformer \
+FIIR_RUN_GENERATION=1 \
+FIIR_ONLY_FORMULA=BaTiO3 \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_batio3_n20.example.json \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_BaTiO3_n20 \
+sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
+```
+
 The example config uses `examples/crystalformer_bulk/fake_generate.py` so tests
 remain offline and stdlib-only. The real example config is a template for an
 existing local CrystalFormer workspace and checkpoint; it is not expected to
