@@ -15,10 +15,12 @@ pairing:
   same_formula_required: true
   same_spacegroup_condition_required: true
   require_raw_sequence: true
+  min_preference_margin: 0.000001
+  max_pairs: null
   allowed_preference_types:
     - geometry_chemistry_only
 
 boundary:
-  build_pairs_in_this_stage: false
+  build_pairs_in_this_stage: true
   train_dpo_in_this_stage: false
   stability_preferences_require_offline_validation: true

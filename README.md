@@ -184,6 +184,20 @@ represent geometry/chemistry preferences; they must not claim stability
 optimization. The schema is documented in
 `docs/specs/crystalformer_dpo_data_schema.md`.
 
+To build the current schema-only preference-pair artifact from an audit:
+
+```bash
+python scripts/build_crystalformer_dpo_preferences.py \
+  --audit-dir outputs/crystalformer_audit/BaTiO3 \
+  --formula BaTiO3 \
+  --output-dir outputs/dpo_preferences/BaTiO3
+```
+
+This writes `preference_pairs.jsonl`, `preference_summary.json`, and
+`report.md`. If all eligible candidates have equal FIIR scores, the builder
+emits zero pairs and records `no_comparable_margin`; it does not fabricate DPO
+labels.
+
 ## Output Files
 
 The configured runner writes:

@@ -42,6 +42,7 @@ class AuditCandidateResult:
     failure_reasons: list[str] = field(default_factory=list)
     preference_type: str | None = None
     condition: dict[str, Any] = field(default_factory=dict)
+    raw_sequence_fields: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +63,7 @@ class AuditCandidateResult:
             "failure_reasons": list(self.failure_reasons),
             "preference_type": self.preference_type,
             "condition": dict(self.condition),
+            "raw_sequence_fields": dict(self.raw_sequence_fields),
         }
 
 
@@ -188,6 +190,7 @@ def audit_candidates(
                 failure_reasons=failure_reasons,
                 preference_type="geometry_chemistry_only" if dpo_eligible and f3_unknown else None,
                 condition=condition,
+                raw_sequence_fields=_raw_sequence_fields(metadata),
             )
         )
     return results
@@ -402,6 +405,19 @@ def _parse_error(metadata: dict[str, Any], oracle_error: str | None) -> str | No
     if metadata.get("parse_error_type"):
         return str(metadata["parse_error_type"])
     return None
+
+
+def _raw_sequence_fields(metadata: dict[str, Any]) -> dict[str, Any]:
+    fields = metadata.get("raw_sequence_fields")
+    if isinstance(fields, dict):
+        return dict(fields)
+    return {
+        "g": metadata.get("raw_g"),
+        "W": metadata.get("raw_W"),
+        "A": metadata.get("raw_A"),
+        "X": metadata.get("raw_X"),
+        "L": metadata.get("raw_L"),
+    }
 
 
 def _as_float_or_none(value: Any) -> float | None:

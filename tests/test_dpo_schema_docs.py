@@ -20,6 +20,7 @@ def test_dpo_schema_doc_defines_pair_boundary() -> None:
         "Do not pair candidates across formulas",
         "Stability preferences require imported offline validation",
         "DPO training is explicitly out of scope",
+        "no_comparable_margin",
     ]:
         assert token in text
 
@@ -30,5 +31,6 @@ def test_dpo_preference_builder_config_is_boundary_only() -> None:
     assert "outputs/dpo_preferences/BaTiO3" in text
     assert "same_formula_required: true" in text
     assert "require_raw_sequence: true" in text
-    assert "build_pairs_in_this_stage: false" in text
+    assert "build_pairs_in_this_stage: true" in text
     assert "train_dpo_in_this_stage: false" in text
+    assert "min_preference_margin: 0.000001" in text

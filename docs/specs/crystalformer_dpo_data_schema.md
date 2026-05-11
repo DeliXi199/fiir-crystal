@@ -1,9 +1,9 @@
 # CrystalFormer DPO Data Schema
 
-This document defines the future preference-pair payload for CrystalFormer DPO
-data. This stage does not train CrystalFormer and does not build a large DPO
-dataset. It only preserves raw sequence fields and marks audit candidates for
-DPO eligibility.
+This document defines the preference-pair payload for CrystalFormer DPO data.
+This stage can build small schema-valid preference-pair files from FIIR audit
+outputs. It does not train CrystalFormer and does not build a large DPO
+dataset.
 
 ## Pair Schema
 
@@ -59,6 +59,11 @@ DPO eligibility.
 ## Current Stage
 
 The current implementation writes `dpo_eligible` and
-`dpo_ineligible_reasons` into the CrystalFormer smoke audit. The next stage is
-a preference-pair builder that consumes audit outputs and writes the schema
-above. DPO training is explicitly out of scope for this stage.
+`dpo_ineligible_reasons` into the CrystalFormer smoke audit, then the
+preference builder can consume `audit_candidates.jsonl` and emit
+`preference_pairs.jsonl` using the schema above.
+
+If all eligible candidates have equal FIIR scores or no comparable margin, the
+builder emits zero pairs and records `no_comparable_margin` in the summary
+rather than fabricating preferences. DPO training is explicitly out of scope
+for this stage.
