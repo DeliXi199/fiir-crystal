@@ -244,7 +244,7 @@ FIIR_RUN_GENERATION=1 \
 FIIR_ONLY_FORMULA=BaTiO3 \
 FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_batio3_n20.example.json \
 FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_BaTiO3_n20 \
-sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
+bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
 Then check multi-formula behavior with the 3x20 perovskite template:
@@ -254,7 +254,7 @@ FIIR_CONDA_ENV=crystalformer \
 FIIR_RUN_GENERATION=1 \
 FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_perovskite_3x20.example.json \
 FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_3x20 \
-sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
+bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
 By default, the SLURM wrapper passes `FIIR_TOTAL_CPU_CORES=$ncpu` to the bulk
@@ -263,6 +263,13 @@ per-process CPU threading. For example, a 64-core node with three formulas
 gets three concurrent CrystalFormer subprocesses with thread allocations like
 `22, 21, 21`. Override this only when needed with
 `FIIR_MAX_CONCURRENT_GENERATIONS` or `FIIR_GENERATION_CPU_THREADS`.
+
+The recommended submitter is `scripts/slurm/submit_crystalformer_bulk.sh`. It
+uses `test` for jobs expected within 30 minutes when an idle test node exists;
+otherwise it checks `regular256`, `regular128`, `regular6430`, `regular`, then
+`test`. If no idle node exists, it queues on all listed partitions. It requests
+one exclusive node and lets the runner use 56 cores on `regular` or 64 cores on
+the other CPU partitions.
 
 The default checked-in config uses a fake stdlib-only generator. The real
 example config keeps `num_samples` small and assumes a prepared external

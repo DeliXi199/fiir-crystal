@@ -1,6 +1,9 @@
 #!/bin/bash
 #
-# Submit from the fiir-crystal repository root with:
+# Submit from the fiir-crystal repository root with the policy wrapper:
+#   bash scripts/slurm/submit_crystalformer_bulk.sh
+#
+# Direct sbatch is also supported:
 #   sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
 #
 # By default this creates a bulk-generation plan only. To validate paths and
@@ -21,7 +24,7 @@
 #
 #SBATCH --account=hmt03
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=64
+#SBATCH --exclusive
 #SBATCH --partition=test
 #SBATCH --job-name=fiir-cf-test
 #SBATCH --output=./slurm_%x_%j.log
@@ -36,6 +39,7 @@ export MV2_ENABLE_AFFINITY="${MV2_ENABLE_AFFINITY:-0}"
 echo "The current job ID is ${SLURM_JOB_ID:-local}"
 echo "Running on ${SLURM_JOB_NUM_NODES:-1} nodes:"
 echo "${SLURM_JOB_NODELIST:-localhost}"
+echo "Using ${SLURM_CPUS_ON_NODE:-${SLURM_NTASKS_PER_NODE:-1}} CPU cores on node"
 echo "Using ${SLURM_NTASKS_PER_NODE:-1} tasks per node"
 echo "A total of ${SLURM_NTASKS:-1} tasks is used"
 
@@ -86,7 +90,11 @@ FIIR_TOTAL_CPU_CORES="${FIIR_TOTAL_CPU_CORES:-}"
 FIIR_MAX_CONCURRENT_GENERATIONS="${FIIR_MAX_CONCURRENT_GENERATIONS:-auto}"
 FIIR_GENERATION_CPU_THREADS="${FIIR_GENERATION_CPU_THREADS:-auto}"
 
-ncpu=$((${SLURM_JOB_NUM_NODES:-1} * ${SLURM_NTASKS_PER_NODE:-1}))
+if [ -n "${SLURM_CPUS_ON_NODE:-}" ]; then
+  ncpu="${SLURM_CPUS_ON_NODE}"
+else
+  ncpu=$((${SLURM_JOB_NUM_NODES:-1} * ${SLURM_NTASKS_PER_NODE:-1}))
+fi
 if [ -z "${FIIR_TOTAL_CPU_CORES}" ]; then
   FIIR_TOTAL_CPU_CORES="${ncpu}"
 fi
