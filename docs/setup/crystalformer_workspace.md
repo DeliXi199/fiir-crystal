@@ -284,9 +284,10 @@ bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
 For a roughly three-hour, broader formula sweep, use 32 formulas x 1600 samples.
-This produces 51200 generated structures. Cap generation concurrency at 16 so
-the job uses one node fully without launching 32 CrystalFormer/JAX processes at
-once:
+This produces 51200 generated structures. Prefer 8 concurrent
+CrystalFormer/JAX processes for long jobs so each process gets roughly 8 CPU
+threads on a 64-core node. This is safer than 16 concurrent processes, which
+has shown `CPULoad` well above `CPUTot` on `regular128` nodes.
 
 ```bash
 FIIR_CONDA_ENV=crystalformer \
@@ -295,15 +296,20 @@ FIIR_CONTINUE_ON_ERROR=1 \
 FIIR_EXPECTED_MINUTES=180 \
 FIIR_TIME_LIMIT=04:00:00 \
 FIIR_SKIP_EXISTING_MODE=no-skip \
-FIIR_MAX_CONCURRENT_GENERATIONS=16 \
+FIIR_MAX_CONCURRENT_GENERATIONS=8 \
 FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_perovskite_32x1600_3h.example.json \
 FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_32x1600_3h \
 bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
 With `FIIR_GENERATION_CPU_THREADS=auto`, the runner divides the available node
-cores across the 16 subprocesses: 4 threads each on 64-core nodes, or a 3/4
-thread mix on `regular`'s 56 cores.
+cores across the 8 subprocesses: 8 threads each on 64-core nodes, or 7 threads
+each on `regular`'s 56 cores.
+
+Runtime note: if `scontrol show node` reports `CPUAlloc=64`, `CPUTot=64`, and
+`CPULoad` far above 64 while stderr remains empty, the job is usually still
+running but over-subscribed. Do not assume failure from high `CPULoad` alone;
+check stderr and memory. For later jobs, lower `FIIR_MAX_CONCURRENT_GENERATIONS`.
 
 For multi-node generation, submit independent one-node shards. The checked-in
 128-formula bank and generated shard configs are:
@@ -329,7 +335,7 @@ for shard in configs/generated/crystalformer_shards/perovskite_128_32x1600/shard
   FIIR_EXPECTED_MINUTES=180 \
   FIIR_TIME_LIMIT=04:00:00 \
   FIIR_SKIP_EXISTING_MODE=no-skip \
-  FIIR_MAX_CONCURRENT_GENERATIONS=16 \
+  FIIR_MAX_CONCURRENT_GENERATIONS=8 \
   FIIR_BULK_CONFIG="${shard}" \
   FIIR_OUTPUT_ROOT="outputs/crystalformer_bulk_real_smoke_perovskite_128_32x1600_${name}" \
   bash scripts/slurm/submit_crystalformer_bulk.sh

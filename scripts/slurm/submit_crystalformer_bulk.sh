@@ -82,6 +82,20 @@ require_integer "FIIR_SHORT_TASK_MINUTES" "$FIIR_SHORT_TASK_MINUTES"
 FIIR_TEST_PARTITION="$(normalize_partition_name "$FIIR_TEST_PARTITION")"
 FIIR_FORCE_PARTITION="$(normalize_partition_name "$FIIR_FORCE_PARTITION")"
 
+concurrency_warning=""
+case "${FIIR_MAX_CONCURRENT_GENERATIONS:-auto}" in
+  ''|auto|AUTO|none|None)
+    ;;
+  *[!0-9]*)
+    ;;
+  *)
+    if [ "$FIIR_EXPECTED_MINUTES" -gt "$FIIR_SHORT_TASK_MINUTES" ] \
+      && [ "$FIIR_MAX_CONCURRENT_GENERATIONS" -gt 8 ]; then
+      concurrency_warning="long_job_high_concurrency_may_oversubscribe_jax_threads:FIIR_MAX_CONCURRENT_GENERATIONS=${FIIR_MAX_CONCURRENT_GENERATIONS}; prefer 8 unless benchmarked"
+    fi
+    ;;
+esac
+
 selected_partition=""
 selected_reason=""
 
@@ -144,6 +158,9 @@ echo "  selected_reason=${selected_reason}"
 echo "  selected_core_budget=${cores}"
 echo "  slurm_log_dir=${FIIR_SLURM_LOG_DIR}"
 echo "  submit_script=${FIIR_SUBMIT_SCRIPT}"
+if [ -n "$concurrency_warning" ]; then
+  echo "  concurrency_warning=${concurrency_warning}"
+fi
 
 printf 'sbatch command:'
 printf ' %q' sbatch "${sbatch_args[@]}" "$FIIR_SUBMIT_SCRIPT"

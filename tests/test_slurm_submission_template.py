@@ -49,6 +49,8 @@ def test_crystalformer_policy_submitter_encodes_partition_order() -> None:
     assert "--ntasks-per-node" in text
     assert "FIIR_TOTAL_CPU_CORES" in text
     assert "FIIR_DRY_RUN" in text
+    assert "long_job_high_concurrency_may_oversubscribe_jax_threads" in text
+    assert "prefer 8 unless benchmarked" in text
     assert 'FIIR_SLURM_LOG_DIR="${FIIR_SLURM_LOG_DIR:-logs/slurm}"' in text
     assert 'mkdir -p "$FIIR_SLURM_LOG_DIR"' in text
     assert '--output "${FIIR_SLURM_LOG_DIR}/%x_%j.log"' in text
@@ -70,6 +72,16 @@ def test_slurm_startup_monitor_encodes_long_job_watch_policy() -> None:
     assert "non-empty stderr" in text
     assert "Startup monitor window passed" in text
     assert "Leave the job to SLURM" in text
+
+
+def test_slurm_readme_documents_cpu_load_oversubscription() -> None:
+    text = Path("scripts/slurm/README.md").read_text(encoding="utf-8")
+
+    assert "CPU Load And Over-Subscription" in text
+    assert "FIIR_MAX_CONCURRENT_GENERATIONS=8" in text
+    assert "CPULoad" in text
+    assert "CPUAlloc=64" in text
+    assert "CPUTot=64" in text
 
 
 def test_slurm_logs_are_gitignored() -> None:

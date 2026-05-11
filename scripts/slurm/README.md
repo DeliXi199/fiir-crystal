@@ -56,7 +56,7 @@ for shard in configs/generated/crystalformer_shards/perovskite_128_32x1600/shard
   FIIR_EXPECTED_MINUTES=180 \
   FIIR_TIME_LIMIT=04:00:00 \
   FIIR_SKIP_EXISTING_MODE=no-skip \
-  FIIR_MAX_CONCURRENT_GENERATIONS=16 \
+  FIIR_MAX_CONCURRENT_GENERATIONS=8 \
   FIIR_BULK_CONFIG="${shard}" \
   FIIR_OUTPUT_ROOT="outputs/crystalformer_bulk_real_smoke_perovskite_128_32x1600_${name}" \
   bash scripts/slurm/submit_crystalformer_bulk.sh
@@ -117,6 +117,25 @@ For CrystalFormer bulk runs, the expected final summary is usually:
 ```text
 <FIIR_OUTPUT_ROOT>/bulk_summary.json
 ```
+
+## CPU Load And Over-Subscription
+
+For long CrystalFormer shards, prefer `FIIR_MAX_CONCURRENT_GENERATIONS=8`.
+Running 16 CrystalFormer/JAX subprocesses on 64-core `regular128` nodes has
+shown `CPULoad` values around 100-120 while `CPUAlloc=64` and `CPUTot=64`.
+That means the node is busy and likely over-subscribed by JAX/BLAS worker
+threads, not necessarily failed.
+
+If `scontrol show node <node>` shows `CPUAlloc` equal to `CPUTot`, stderr is
+empty, memory is below node capacity, and `squeue` still shows the job running,
+let the current job continue. For future jobs, reduce concurrency:
+
+```bash
+FIIR_MAX_CONCURRENT_GENERATIONS=8
+```
+
+The submitter prints a warning when a long job explicitly requests more than 8
+concurrent generation subprocesses.
 
 When `FIIR_RUN_GENERATION=1`, `auto` parallelism uses the full CPU budget. For
 example, a 64-core node with a three-formula config runs three CrystalFormer
