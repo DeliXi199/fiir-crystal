@@ -152,6 +152,28 @@ def test_real_perovskite_10x20_example_config_validate_only_is_template_safe(tmp
     assert summary["items"][-1]["formula"] == "PbTiO3"
 
 
+def test_real_perovskite_10x400_example_config_validate_only_is_template_safe(tmp_path) -> None:
+    output_root = tmp_path / "real_perovskite_10x400_validate"
+
+    result = main(
+        [
+            "--config",
+            "configs/crystalformer_bulk_generation.real_perovskite_10x400.example.json",
+            "--output-root",
+            str(output_root),
+            "--validate-only",
+        ]
+    )
+
+    summary = result["summary"]
+    assert summary["validate_only"] is True
+    assert summary["formula_count"] == 10
+    assert summary["total_num_samples"] == 4000
+    assert [item["num_samples"] for item in summary["items"]] == [400] * 10
+    assert summary["items"][0]["formula"] == "BaTiO3"
+    assert summary["items"][-1]["formula"] == "PbTiO3"
+
+
 def test_validate_only_reports_missing_referenced_checkpoint_as_blocking(tmp_path) -> None:
     work_dir = tmp_path / "CrystalFormer"
     work_dir.mkdir()

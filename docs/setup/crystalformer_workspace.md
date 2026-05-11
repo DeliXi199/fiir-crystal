@@ -269,6 +269,25 @@ FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_10x20 \
 bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
+For a longer smoke that should occupy a test node for roughly 25 minutes, use
+10 formulas x 400 samples:
+
+```bash
+FIIR_CONDA_ENV=crystalformer \
+FIIR_RUN_GENERATION=1 \
+FIIR_CONTINUE_ON_ERROR=1 \
+FIIR_EXPECTED_MINUTES=25 \
+FIIR_SKIP_EXISTING_MODE=no-skip \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_perovskite_10x400.example.json \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_10x400 \
+bash scripts/slurm/submit_crystalformer_bulk.sh
+```
+
+For longer generation jobs, watch `squeue`, the SLURM stdout file, and the
+SLURM stderr file under `logs/slurm/` for the first five minutes. If the job is
+still running cleanly, leave it to finish under SLURM and inspect
+`bulk_summary.json` afterward.
+
 By default, the SLURM wrapper passes `FIIR_TOTAL_CPU_CORES=$ncpu` to the bulk
 runner. The runner uses that budget for formula-level concurrency plus
 per-process CPU threading. For example, a 64-core node with three formulas

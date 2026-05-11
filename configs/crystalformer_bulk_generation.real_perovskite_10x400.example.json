@@ -1,0 +1,46 @@
+{
+  "crystalformer_work_dir": "external/CrystalFormer",
+  "checkpoint_dir": "external/checkpoints/crystalformer/alex20s_csp",
+  "output_root": "outputs/crystalformer_bulk_real_smoke_perovskite_10x400",
+  "parser_backend": "none",
+  "stability_mode": "unavailable_without_offline_validation",
+  "source_format": "auto",
+  "skip_existing": true,
+  "defaults": {
+    "num_samples": 400,
+    "top_k": 40
+  },
+  "command_template": "python ./main.py --optimizer none --restore_path {checkpoint_dir} --K {top_k} --num_samples {num_samples} --formula {formula} --save_path {raw_output_dir}/output.csv",
+  "formulas": [
+    {
+      "formula": "BaTiO3"
+    },
+    {
+      "formula": "SrTiO3"
+    },
+    {
+      "formula": "CaTiO3"
+    },
+    {
+      "formula": "BaZrO3"
+    },
+    {
+      "formula": "SrZrO3"
+    },
+    {
+      "formula": "CaZrO3"
+    },
+    {
+      "formula": "BaHfO3"
+    },
+    {
+      "formula": "SrHfO3"
+    },
+    {
+      "formula": "CaHfO3"
+    },
+    {
+      "formula": "PbTiO3"
+    }
+  ]
+}

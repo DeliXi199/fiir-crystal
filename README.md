@@ -308,6 +308,24 @@ FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_10x20 \
 bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
+For a longer generation-only smoke intended to occupy a test node for roughly
+25 minutes, use the 10 formulas x 400 samples template:
+
+```bash
+FIIR_CONDA_ENV=crystalformer \
+FIIR_RUN_GENERATION=1 \
+FIIR_CONTINUE_ON_ERROR=1 \
+FIIR_EXPECTED_MINUTES=25 \
+FIIR_SKIP_EXISTING_MODE=no-skip \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_perovskite_10x400.example.json \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_10x400 \
+bash scripts/slurm/submit_crystalformer_bulk.sh
+```
+
+For longer jobs, monitor `squeue` plus the corresponding `logs/slurm/` stdout
+and stderr for the first five minutes. If the job is still running cleanly, let
+SLURM finish it unattended and inspect `bulk_summary.json` afterward.
+
 The SLURM template now passes the full node CPU budget to the runner. With
 `--run-generation`, the runner automatically runs formulas concurrently and
 assigns CPU threads to each CrystalFormer subprocess. On the 64-core test node,
