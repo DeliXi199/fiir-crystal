@@ -102,6 +102,8 @@ class FailureOracle:
         if not is_valid or hard_failures:
             return int(CalibrationTier.TIER_0)
         sources = [getattr(result, "evidence", {}).get("source") for result in results]
+        if any(source in {"missing_placeholder", "unavailable_without_offline_validation"} for source in sources):
+            return int(CalibrationTier.TIER_1)
         if sources and all(source == "mock" for source in sources):
             return int(CalibrationTier.TIER_1)
         return int(CalibrationTier.TIER_2)

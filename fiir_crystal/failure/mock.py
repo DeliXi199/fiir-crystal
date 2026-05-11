@@ -52,6 +52,8 @@ class StructureLike:
     def structure_ref(self) -> str:
         """Stable mock structure reference."""
 
+        if self.metadata.get("structure_ref"):
+            return str(self.metadata["structure_ref"])
         return f"mock://{self.candidate_id}"
 
     @property

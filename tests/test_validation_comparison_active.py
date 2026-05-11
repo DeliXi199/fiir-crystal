@@ -189,6 +189,7 @@ def test_cli_help_and_missing_input_are_clear() -> None:
         "scripts/compare_pair_modes.py",
         "scripts/compare_experiments.py",
         "scripts/run_mock_active_loop.py",
+        "scripts/run_crystalformer_adapter.py",
     ]
     for script in scripts:
         completed = subprocess.run(

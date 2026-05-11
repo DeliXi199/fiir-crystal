@@ -18,6 +18,7 @@ The package intentionally does not run heavy external workflows:
 Implemented today:
 
 - `StructureLike` / `CrystalRecord` mock candidate model.
+- Stdlib-only `CrystalStructureRecord` for real external generator outputs.
 - Lightweight F1/F2/F3 `FailureOracle`.
 - Matched axis-aligned preference pairs.
 - Baseline pair modes: `axis_aligned`, `weighted_sum`, `random_negative`, `binary_success_failure`.
@@ -29,6 +30,8 @@ Implemented today:
 - Multi-run experiment aggregation from existing output directories.
 - Offline validation result JSONL import and validation-aware metrics.
 - Mock feedback buffer and multi-round active discovery loop simulation.
+- External generator adapter boundary plus a first CrystalFormer output adapter
+  for `deepmodeling/CrystalFormer` outputs.
 
 ## Install
 
@@ -104,6 +107,38 @@ python scripts/run_mock_active_loop.py \
   --rounds 2
 ```
 
+## Normalize CrystalFormer Outputs
+
+FIIR Crystal can read outputs produced by the external
+`deepmodeling/CrystalFormer` project and convert them into standard
+`CrystalStructureRecord` JSONL candidates:
+
+```bash
+python scripts/run_crystalformer_adapter.py \
+  --config configs/crystalformer_adapter.yaml \
+  --output-dir outputs/crystalformer_run
+```
+
+By default this is load-only: it reads an existing output directory configured
+under `generation.output_dir`, writes `candidates.jsonl`, then runs the
+lightweight FIIR failure/ranking/report flow in `fiir_run/`.
+
+An optional subprocess mode is available only when the user supplies the exact
+command:
+
+```bash
+python scripts/run_crystalformer_adapter.py \
+  --config configs/crystalformer_adapter.yaml \
+  --run-generation
+```
+
+FIIR Crystal does not clone CrystalFormer, install its dependencies, download
+checkpoints, download datasets, train CrystalFormer, run DFT, run MLIP, or call
+Materials Project or other external APIs. CrystalFormer outputs are candidate
+structures only; they are not relaxed stable materials. F3 stability remains
+unavailable or low-confidence unless offline validation, MLIP relaxation, or DFT
+results are imported.
+
 ## Output Files
 
 The configured runner writes:
@@ -132,6 +167,8 @@ plus `feedback_buffer.jsonl`, `active_loop_state.json`,
 - `fiir_crystal.failure`: F1/F2/F3 vectors, lightweight labelers, oracle, and data models.
 - `fiir_crystal.fsal`: matched pair mining and baseline pair construction.
 - `fiir_crystal.discovery`: mock screening, ranking, validation-task metadata, and feedback.
+- `fiir_crystal.structures`: stdlib-only standard structure records for external outputs.
+- `fiir_crystal.generation`: generator interfaces and external adapter boundaries.
 - `fiir_crystal.evaluation`: experiment metrics and JSON-serializable reports.
 - `fiir_crystal.io`: JSON/JSONL helpers.
 - `fiir_crystal.config`: lightweight config loader.
@@ -144,6 +181,8 @@ plus `feedback_buffer.jsonl`, `active_loop_state.json`,
 
 - Mock structures are not physical crystal objects.
 - F2 chemistry and F3 stability are lightweight placeholders.
+- CrystalFormer adapter parsing is conservative and does not parse CIF contents
+  without an optional external parser.
 - No MLIP, DFT, database novelty, synthesizability model, or real training is run.
 - Pareto ranking is intentionally small and deterministic.
 - Active loop rounds reuse mock candidates with metadata hints; no generator is trained.

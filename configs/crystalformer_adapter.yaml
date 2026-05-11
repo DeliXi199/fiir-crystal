@@ -1,0 +1,18 @@
+generation:
+  backend: crystalformer
+  run_generation: false
+  crystalformer_work_dir: external/CrystalFormer
+  crystalformer_command: null
+  output_dir: outputs/external_crystalformer_raw
+  normalized_output: outputs/crystalformer_run/candidates.jsonl
+  source_format: auto
+
+  mode: csp
+  formula: BaTiO3
+  spacegroup: null
+  num_samples: 128
+  seed: 7
+
+screening:
+  use_existing_failure_oracle: true
+  stability_mode: unavailable_without_offline_validation

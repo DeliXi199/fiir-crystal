@@ -41,11 +41,20 @@ class StabilityFailureLabeler(StabilityScorer):
 
         raw_score = structure.metadata.get("mock_stability_score", structure.mock_stability_score)
         if raw_score is None:
+            source = str(structure.metadata.get("stability_mode", "missing_placeholder"))
             return StabilityFailureResult(
                 self.missing_score,
                 False,
                 [],
-                {"source": "missing_placeholder", "missing_score": self.missing_score},
+                {
+                    "source": source,
+                    "missing_score": self.missing_score,
+                    "unavailable_reason": structure.metadata.get(
+                        "stability_unavailable_reason",
+                        "no offline validation result was provided",
+                    ),
+                    "confidence": "low",
+                },
             )
         score = max(0.0, min(1.0, float(raw_score)))
         return StabilityFailureResult(score, False, [], {"source": "mock", "mock_stability_score": score})

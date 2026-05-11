@@ -71,6 +71,18 @@ def write_json(path: str | Path, item: Any) -> None:
 
 
 def read_mock_candidates_jsonl(path: str | Path) -> list[StructureLike]:
-    """Read mock candidates from JSONL into `StructureLike` records."""
+    """Read mock or normalized structure candidates into `StructureLike` records."""
 
-    return [StructureLike.from_dict(row) for row in read_jsonl(path)]
+    structures: list[StructureLike] = []
+    for row in read_jsonl(path):
+        if _looks_like_structure_record(row):
+            from fiir_crystal.structures import CrystalStructureRecord
+
+            structures.append(CrystalStructureRecord.from_dict(row).to_structure_like())
+        else:
+            structures.append(StructureLike.from_dict(row))
+    return structures
+
+
+def _looks_like_structure_record(row: dict[str, Any]) -> bool:
+    return "species" in row and "lattice_matrix" in row and "source" in row
