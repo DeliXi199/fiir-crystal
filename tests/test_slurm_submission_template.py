@@ -13,6 +13,9 @@ def test_crystalformer_bulk_slurm_template_is_safe_by_default() -> None:
     assert "FIIR_VALIDATE_ONLY is enabled" in text
     assert 'FIIR_RUN_GENERATION="${FIIR_RUN_GENERATION:-0}"' in text
     assert "--run-generation" in text
+    assert 'conda activate "${FIIR_CONDA_ENV}"' in text
+    assert 'source "${FIIR_VENV}/bin/activate"' in text
+    assert text.count("set +u") >= 2
     assert "FIIR_RUN_GENERATION is not enabled" in text
     assert "scripts/run_crystalformer_bulk_generation.py" in text
 

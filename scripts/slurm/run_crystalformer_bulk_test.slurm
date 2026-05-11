@@ -56,13 +56,17 @@ fi
 
 if [ -n "${FIIR_CONDA_ENV:-}" ]; then
   echo "Activating conda environment: ${FIIR_CONDA_ENV}"
+  set +u
   conda activate "${FIIR_CONDA_ENV}"
+  set -u
 fi
 
 if [ -n "${FIIR_VENV:-}" ]; then
   echo "Activating virtualenv: ${FIIR_VENV}"
+  set +u
   # shellcheck disable=SC1090
   source "${FIIR_VENV}/bin/activate"
+  set -u
 fi
 
 cd "${SLURM_SUBMIT_DIR:-$(pwd)}"
