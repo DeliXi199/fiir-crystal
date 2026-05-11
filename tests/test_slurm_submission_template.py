@@ -39,24 +39,35 @@ def test_crystalformer_policy_submitter_encodes_partition_order() -> None:
     assert "FIIR_SHORT_TASK_MINUTES" in text
     assert "normalize_partition_name" in text
     assert "regular256*" in text
-    assert "idle_node_count" in text
-    assert "sinfo" in text
-    assert "regular)" in text
-    assert "printf '56" in text
-    assert "printf '64" in text
-    assert "join_partitions" in text
+    assert "plan_slurm_job.py" in text
+    assert "--kind cpu" in text
+    assert "--shell-vars" in text
+    assert "FIIR_SELECTED_PARTITION_ARG" in text
+    assert "FIIR_SELECTED_CORE_BUDGET" in text
+    assert "FIIR_EXPORT_ARG" in text
     assert "--exclusive" in text
     assert "--ntasks-per-node" in text
-    assert "FIIR_TOTAL_CPU_CORES" in text
+    assert "export_arg=\"$FIIR_EXPORT_ARG\"" in text
     assert "FIIR_DRY_RUN" in text
-    assert "long_job_high_concurrency_may_oversubscribe_jax_threads" in text
-    assert "prefer 8 unless benchmarked" in text
+    assert "FIIR_CONCURRENCY_WARNING" in text
     assert 'FIIR_SLURM_LOG_DIR="${FIIR_SLURM_LOG_DIR:-logs/slurm}"' in text
     assert 'mkdir -p "$FIIR_SLURM_LOG_DIR"' in text
     assert '--output "${FIIR_SLURM_LOG_DIR}/%x_%j.log"' in text
     assert '--error "${FIIR_SLURM_LOG_DIR}/%x_%j.err"' in text
     assert "monitor_slurm_startup.sh --job-id" in text
     assert "Submitted batch job" in text
+
+
+def test_unified_slurm_planner_cli_exists() -> None:
+    script = Path("scripts/slurm/plan_slurm_job.py")
+    text = script.read_text(encoding="utf-8")
+
+    assert "--kind" in text
+    assert "choices=(\"cpu\", \"gpu\")" in text
+    assert "CpuSchedulingConfig" in text
+    assert "GpuSchedulingConfig" in text
+    assert "--shell-vars" in text
+    assert "--run-sbatch" in text
 
 
 def test_slurm_startup_monitor_encodes_long_job_watch_policy() -> None:

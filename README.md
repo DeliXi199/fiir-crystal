@@ -268,7 +268,8 @@ reported as stable.
 For SLURM GPU runs, plan the allocation before submitting work:
 
 ```bash
-python scripts/slurm/plan_gpu_job.py \
+python scripts/slurm/plan_slurm_job.py \
+  --kind gpu \
   --accelerator cuda \
   --job-name fiir-mlip-gpu-smoke \
   --time 00:30:00 \
@@ -465,7 +466,9 @@ Use `scripts/slurm/submit_crystalformer_bulk.sh` for submissions. It prefers an
 idle `test` node for jobs expected to finish within 30 minutes, otherwise checks
 `regular256`, `regular128`, `regular6430`, `regular`, then `test`; if no idle
 node exists, it queues on all of those partitions. It requests one exclusive
-node and uses 56 cores on `regular` or 64 cores on the other CPU partitions.
+node and uses the selected node's full `CPUTot` when SLURM reports it, with a
+56-core fallback for `regular` and 64-core fallback for the other CPU policy
+partitions.
 If `sinfo` displays `regular256*`, the `*` only marks the default partition;
 the actual partition name used by `sbatch` is `regular256`.
 All SLURM stdout/stderr files are written under `logs/slurm/` by default.

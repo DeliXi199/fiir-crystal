@@ -380,8 +380,9 @@ The recommended submitter is `scripts/slurm/submit_crystalformer_bulk.sh`. It
 uses `test` for jobs expected within 30 minutes when an idle test node exists;
 otherwise it checks `regular256`, `regular128`, `regular6430`, `regular`, then
 `test`. If no idle node exists, it queues on all listed partitions. It requests
-one exclusive node and lets the runner use 56 cores on `regular` or 64 cores on
-the other CPU partitions. SLURM stdout/stderr files are collected under
+one exclusive node and lets the runner use the selected node's full `CPUTot`
+when SLURM reports it, with a 56-core fallback for `regular` and 64-core
+fallback for the other CPU policy partitions. SLURM stdout/stderr files are collected under
 `logs/slurm/` by default. If `sinfo` displays `regular256*`, the `*` only marks
 the default partition; the actual partition name is `regular256`.
 

@@ -7,15 +7,19 @@ the policy wrapper:
 bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
-The wrapper submits one exclusive node by default and uses all CPU cores on
-that node. Partition selection follows this policy:
+The wrapper delegates selection to the unified stdlib-only planner
+`scripts/slurm/plan_slurm_job.py --kind cpu`. It submits one exclusive node by
+default and uses all CPU cores on that node. Partition selection follows this
+policy:
 
 - If `FIIR_EXPECTED_MINUTES <= 30` and `test` has an idle node, use `test`.
 - Otherwise use the first idle partition in this order:
   `regular256`, `regular128`, `regular6430`, `regular`, `test`.
 - If none have idle nodes, queue on all policy partitions:
   `regular256,regular128,regular6430,regular,test`.
-- `regular` is treated as 56 cores; all other listed CPU partitions are treated as 64 cores.
+- When node details are available, the planner uses the selected node's full
+  `CPUTot`; if SLURM details are unavailable, `regular` falls back to 56 cores
+  and the other listed CPU partitions fall back to 64 cores.
 - `sinfo` may display the default partition as `regular256*`. The trailing
   `*` is only a display marker, not part of the partition name. Use
   `regular256` in `FIIR_FORCE_PARTITION` or `FIIR_PARTITION_ORDER`; the
@@ -145,18 +149,20 @@ Resolved allocations are recorded in `bulk_summary.json` and
 
 ## GPU Node Planning Policy
 
-Use `scripts/slurm/plan_gpu_job.py` before launching optional local MLIP or
-other GPU work. The planner is read-only by default: it inspects SLURM node
-state, ranks nodes by remaining GPU capacity, GPU model weight, idle CPU cores,
-and free memory, then prints an `sbatch` command. It submits only when
-`--run-sbatch` is passed explicitly.
+Use the same unified planner with `--kind gpu` before launching optional local
+MLIP or other GPU work. The planner is read-only by default: it inspects SLURM
+node state, ranks nodes by remaining GPU capacity, GPU model weight, idle CPU
+cores, and free memory, then prints an `sbatch` command. It submits only when
+`--run-sbatch` is passed explicitly. The older `scripts/slurm/plan_gpu_job.py`
+entrypoint remains as a GPU-only compatibility wrapper.
 
 For CUDA PyTorch jobs, the default `--accelerator cuda` ignores AMD and Intel
 GPU partitions so a CUDA environment is not accidentally placed on the wrong
 hardware. Override with `--accelerator any` for non-CUDA workflows.
 
 ```bash
-python scripts/slurm/plan_gpu_job.py \
+python scripts/slurm/plan_slurm_job.py \
+  --kind gpu \
   --accelerator cuda \
   --job-name fiir-mlip-gpu-smoke \
   --time 00:30:00 \

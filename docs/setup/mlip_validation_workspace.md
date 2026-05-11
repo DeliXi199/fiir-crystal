@@ -70,7 +70,8 @@ GPU model weight, idle CPU cores, and free memory, then emits an `sbatch`
 command that requests all currently free GPUs and CPUs on the selected node.
 
 ```bash
-python scripts/slurm/plan_gpu_job.py \
+python scripts/slurm/plan_slurm_job.py \
+  --kind gpu \
   --accelerator cuda \
   --job-name fiir-mlip-gpu-smoke \
   --time 00:30:00 \

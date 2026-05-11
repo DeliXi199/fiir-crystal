@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Policy-aware submitter for CrystalFormer bulk jobs.
-# It selects one CPU node partition before calling sbatch:
+# It delegates CPU node planning to scripts/slurm/plan_slurm_job.py:
 # - <=30 minute jobs prefer an idle test node.
 # - Otherwise use: regular256, regular128, regular6430, regular, test.
 # - If no partition has idle nodes, queue on all partitions in that order.
@@ -27,44 +27,6 @@ normalize_partition_name() {
   printf '%s\n' "${partition%\*}"
 }
 
-partition_cores() {
-  local partition
-  partition="$(normalize_partition_name "$1")"
-  case "$partition" in
-    regular)
-      printf '56\n'
-      ;;
-    *)
-      printf '64\n'
-      ;;
-  esac
-}
-
-join_partitions() {
-  local joined=""
-  local partition
-  for partition in $FIIR_PARTITION_ORDER; do
-    partition="$(normalize_partition_name "$partition")"
-    if [ -z "$joined" ]; then
-      joined="$partition"
-    else
-      joined="${joined},${partition}"
-    fi
-  done
-  printf '%s\n' "$joined"
-}
-
-idle_node_count() {
-  local partition
-  partition="$(normalize_partition_name "$1")"
-  if ! command -v sinfo >/dev/null 2>&1; then
-    printf '0\n'
-    return
-  fi
-  sinfo -h -p "$partition" -t idle -o "%D" 2>/dev/null \
-    | awk '{ total += $1 } END { print total + 0 }'
-}
-
 require_integer() {
   local name="$1"
   local value="$2"
@@ -82,52 +44,30 @@ require_integer "FIIR_SHORT_TASK_MINUTES" "$FIIR_SHORT_TASK_MINUTES"
 FIIR_TEST_PARTITION="$(normalize_partition_name "$FIIR_TEST_PARTITION")"
 FIIR_FORCE_PARTITION="$(normalize_partition_name "$FIIR_FORCE_PARTITION")"
 
-concurrency_warning=""
-case "${FIIR_MAX_CONCURRENT_GENERATIONS:-auto}" in
-  ''|auto|AUTO|none|None)
-    ;;
-  *[!0-9]*)
-    ;;
-  *)
-    if [ "$FIIR_EXPECTED_MINUTES" -gt "$FIIR_SHORT_TASK_MINUTES" ] \
-      && [ "$FIIR_MAX_CONCURRENT_GENERATIONS" -gt 8 ]; then
-      concurrency_warning="long_job_high_concurrency_may_oversubscribe_jax_threads:FIIR_MAX_CONCURRENT_GENERATIONS=${FIIR_MAX_CONCURRENT_GENERATIONS}; prefer 8 unless benchmarked"
-    fi
-    ;;
-esac
+planner_vars="$(
+  python scripts/slurm/plan_slurm_job.py \
+    --kind cpu \
+    --partition-order "$FIIR_PARTITION_ORDER" \
+    --expected-minutes "$FIIR_EXPECTED_MINUTES" \
+    --short-task-minutes "$FIIR_SHORT_TASK_MINUTES" \
+    --test-partition "$FIIR_TEST_PARTITION" \
+    --force-partition "$FIIR_FORCE_PARTITION" \
+    --max-concurrent-generations "${FIIR_MAX_CONCURRENT_GENERATIONS:-auto}" \
+    --shell-vars
+)"
+eval "$planner_vars"
 
-selected_partition=""
-selected_reason=""
+partition_arg="$FIIR_SELECTED_PARTITION_ARG"
+selected_reason="$FIIR_SELECTED_REASON"
+cores="${FIIR_SELECTED_CORE_BUDGET:-}"
+export_arg="$FIIR_EXPORT_ARG"
+concurrency_warning="${FIIR_CONCURRENCY_WARNING:-}"
 
-if [ -n "$FIIR_FORCE_PARTITION" ]; then
-  selected_partition="$FIIR_FORCE_PARTITION"
-  selected_reason="forced"
-elif [ "$FIIR_EXPECTED_MINUTES" -le "$FIIR_SHORT_TASK_MINUTES" ] \
-  && [ "$(idle_node_count "$FIIR_TEST_PARTITION")" -gt 0 ]; then
-  selected_partition="$FIIR_TEST_PARTITION"
-  selected_reason="short_job_idle_test"
-else
-  for partition in $FIIR_PARTITION_ORDER; do
-    partition="$(normalize_partition_name "$partition")"
-    if [ "$(idle_node_count "$partition")" -gt 0 ]; then
-      selected_partition="$partition"
-      selected_reason="first_idle_in_policy_order"
-      break
-    fi
-  done
-fi
-
-if [ -n "$selected_partition" ]; then
-  partition_arg="$selected_partition"
-  cores="$(partition_cores "$selected_partition")"
-  export_arg="ALL,FIIR_TOTAL_CPU_CORES=${cores}"
+if [ -n "$cores" ]; then
   ntasks_args=(--ntasks-per-node "$cores")
 else
-  partition_arg="$(join_partitions)"
   cores="auto"
-  export_arg="ALL"
   ntasks_args=()
-  selected_reason="no_idle_queue_all_policy_partitions"
 fi
 
 sbatch_args=(

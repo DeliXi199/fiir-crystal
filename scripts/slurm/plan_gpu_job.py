@@ -19,7 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from fiir_crystal.io import write_json
-from fiir_crystal.slurm_gpu_policy import (
+from fiir_crystal.slurm_scheduling import (
     GpuSchedulingConfig,
     discover_gpu_nodes,
     parse_gpu_weights,
