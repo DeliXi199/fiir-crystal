@@ -247,6 +247,16 @@ FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_BaTiO3_n20 \
 sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
 ```
 
+Then check multi-formula behavior with the 3x20 perovskite template:
+
+```bash
+FIIR_CONDA_ENV=crystalformer \
+FIIR_RUN_GENERATION=1 \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_perovskite_3x20.example.json \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_3x20 \
+sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
+```
+
 The default checked-in config uses a fake stdlib-only generator. The real
 example config keeps `num_samples` small and assumes a prepared external
 CrystalFormer workspace plus checkpoint. Use `--only-formula BaTiO3` for a

@@ -284,6 +284,17 @@ FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_BaTiO3_n20 \
 sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
 ```
 
+After that, use the 3-formula perovskite template to verify bulk behavior
+across formula boundaries:
+
+```bash
+FIIR_CONDA_ENV=crystalformer \
+FIIR_RUN_GENERATION=1 \
+FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real_perovskite_3x20.example.json \
+FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_3x20 \
+sbatch scripts/slurm/run_crystalformer_bulk_test.slurm
+```
+
 The example config uses `examples/crystalformer_bulk/fake_generate.py` so tests
 remain offline and stdlib-only. The real example config is a template for an
 existing local CrystalFormer workspace and checkpoint; it is not expected to
