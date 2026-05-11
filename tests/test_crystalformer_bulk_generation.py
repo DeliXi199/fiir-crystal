@@ -82,6 +82,8 @@ def test_real_example_config_validate_only_is_template_safe(tmp_path) -> None:
     assert summary["total_num_samples"] == 5
     assert summary["items"][0]["formula"] == "BaTiO3"
     assert "python ./main.py" in summary["items"][0]["command"]
+    assert Path(summary["items"][0]["raw_output_dir"]).is_absolute()
+    assert str(Path("external/checkpoints/crystalformer").resolve()) in summary["items"][0]["command"]
     assert "checkpoint_dir_referenced_by_template" in summary["workspace"]
 
 

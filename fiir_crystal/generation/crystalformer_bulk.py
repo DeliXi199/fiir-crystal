@@ -200,11 +200,11 @@ def build_bulk_plan(
                 "spacegroup": formula_config.spacegroup,
                 "num_samples": formula_config.num_samples,
                 "top_k": formula_config.top_k,
-                "raw_output_dir": str(raw_output_dir),
-                "smoke_output_root": str(smoke_root),
+                "raw_output_dir": context["raw_output_dir"],
+                "smoke_output_root": context["smoke_output_root"],
                 "offline_validation_jsonl": _offline_validation_path(config, formula_config),
                 "command": command,
-                "work_dir": str(config.crystalformer_work_dir),
+                "work_dir": context["crystalformer_work_dir"],
                 "skip_existing": skip_existing_effective and _has_existing_raw_output(raw_output_dir),
                 "skip_reason": (
                     "existing_raw_output"
@@ -474,11 +474,11 @@ def _template_context(
         "spacegroup": "" if formula.spacegroup is None else formula.spacegroup,
         "num_samples": formula.num_samples,
         "top_k": config.default_top_k if formula.top_k is None else formula.top_k,
-        "checkpoint_dir": str(config.checkpoint_dir),
-        "crystalformer_work_dir": str(config.crystalformer_work_dir),
-        "raw_output_dir": str(raw_output_dir),
-        "smoke_output_root": str(smoke_output_root),
-        "output_root": str(config.output_root),
+        "checkpoint_dir": _absolute_path(config.checkpoint_dir),
+        "crystalformer_work_dir": _absolute_path(config.crystalformer_work_dir),
+        "raw_output_dir": _absolute_path(raw_output_dir),
+        "smoke_output_root": _absolute_path(smoke_output_root),
+        "output_root": _absolute_path(config.output_root),
     }
     context.update(formula.extra)
     return context
@@ -601,6 +601,10 @@ def _with_output_override(
         max_candidates=config.max_candidates,
         offline_validation_root=config.offline_validation_root,
     )
+
+
+def _absolute_path(path: Path) -> str:
+    return str(path if path.is_absolute() else path.resolve())
 
 
 def _merge_counts(target: dict[str, int], incoming: Any) -> None:
