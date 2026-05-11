@@ -82,3 +82,34 @@ def test_adapter_marks_missing_raw_sequence_fields(tmp_path) -> None:
     assert metadata["raw_sequence_status"] == "missing"
     assert metadata["missing_sequence_fields"] == ["g", "W", "A", "X", "L"]
     assert metadata["raw_sequence_fields"] == {"g": None, "W": None, "A": None, "X": None, "L": None}
+
+
+def test_adapter_maps_real_crystalformer_atomic_numbers_and_padding(tmp_path) -> None:
+    path = tmp_path / "output_BaTiO3.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["G", "L", "X", "A", "W", "logp"])
+        writer.writeheader()
+        writer.writerow(
+            {
+                "G": "221",
+                "L": "[4, 4, 4, 90, 90, 90]",
+                "X": "[[0, 0, 0], [0.5, 0.5, 0.5], [0.5, 0.5, 0], [0.5, 0, 0.5], [0, 0.5, 0.5], [0, 0, 0]]",
+                "A": "[56, 22, 8, 8, 8, 0]",
+                "W": "[1, 1, 1, 1, 1, 0]",
+                "logp": "-1.0",
+            }
+        )
+
+    records = CrystalFormerAdapter(
+        {"source_format": "crystalformer_raw_csv", "formula": "BaTiO3"}
+    ).load_outputs(path)
+    record = records[0]
+
+    assert record.species == ("Ba", "Ti", "O", "O", "O")
+    assert len(record.frac_coords) == 5
+    assert record.composition == "BaTiO3"
+    assert record.num_sites == 5
+    assert record.space_group == 221
+    assert record.wyckoff_letters == ("1", "1", "1", "1", "1")
+    assert record.metadata["raw_A"] == "[56, 22, 8, 8, 8, 0]"
+    assert record.metadata["raw_sequence_status"] == "full"

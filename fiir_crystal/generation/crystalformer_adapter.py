@@ -290,20 +290,33 @@ class CrystalFormerAdapter:
         require_structured_fields: bool = True,
     ) -> CrystalStructureRecord:
         candidate_id = _first_value(row, "candidate_id", "sample_id", "id", "name")
-        species = _parse_species(_first_value(row, "species", "atom_types", "elements", "A"))
-        frac_coords = _parse_coords(_first_value(row, "frac_coords", "fractional_coords", "coords", "X"))
+        species, active_indices = _parse_species_with_active_indices(
+            _first_value(row, "species", "atom_types", "elements", "A")
+        )
+        frac_coords = _trim_by_active_indices(
+            _parse_coords(_first_value(row, "frac_coords", "fractional_coords", "coords", "X")),
+            active_indices,
+        )
         lattice = _parse_lattice(row)
         composition = _first_value(row, "composition", "formula", "target_formula")
-        wyckoff = _parse_tokens(_first_value(row, "wyckoff_letters", "wyckoff", "W"))
+        wyckoff = _trim_by_active_indices(
+            _parse_tokens(_first_value(row, "wyckoff_letters", "wyckoff", "W")),
+            active_indices,
+        )
         num_sites = _optional_int(_first_value(row, "num_sites", "num_atoms", "natoms"))
         source_format = "crystalformer_raw_csv"
+        normalized_composition = (
+            str(composition)
+            if composition
+            else _first_non_empty(self.config.get("formula"), composition_from_species(species))
+        )
         metadata = _metadata_from_crystalformer_row(
             row=row,
             index=index,
             csv_path=csv_path,
             source_format=source_format,
             config=self.config,
-            composition=str(composition) if composition else composition_from_species(species),
+            composition=normalized_composition,
             space_group=_optional_int(_first_value(row, "space_group", "spacegroup", "sg", "g")),
         )
         record = CrystalStructureRecord(
@@ -312,7 +325,7 @@ class CrystalFormerAdapter:
             frac_coords=frac_coords,
             lattice_matrix=lattice,
             pbc=(True, True, True),
-            composition=str(composition) if composition else composition_from_species(species),
+            composition=normalized_composition,
             num_sites=num_sites if num_sites is not None else len(species) or len(frac_coords),
             space_group=_optional_int(_first_value(row, "space_group", "spacegroup", "sg", "g")),
             wyckoff_letters=wyckoff or None,
@@ -543,16 +556,30 @@ def _literal(value: Any) -> Any:
 
 
 def _parse_species(value: Any) -> tuple[str, ...]:
+    return _parse_species_with_active_indices(value)[0]
+
+
+def _parse_species_with_active_indices(value: Any) -> tuple[tuple[str, ...], tuple[int, ...] | None]:
     parsed = _literal(value)
     if parsed is None:
-        return ()
+        return (), None
+    if _looks_like_atomic_number_sequence(parsed):
+        numbers = [int(float(item)) for item in _flatten(parsed)]
+        active = tuple(index for index, number in enumerate(numbers) if number > 0)
+        species = tuple(_element_symbol(number) for number in numbers if number > 0)
+        return species, active
     if isinstance(parsed, str):
         text = parsed.replace(";", ",").replace("|", ",")
         tokens = [item.strip() for item in text.replace(" ", ",").split(",") if item.strip()]
-        return tuple(tokens)
+        if tokens and all(_is_number_token(item) for item in tokens):
+            numbers = [int(float(item)) for item in tokens]
+            active = tuple(index for index, number in enumerate(numbers) if number > 0)
+            species = tuple(_element_symbol(number) for number in numbers if number > 0)
+            return species, active
+        return tuple(tokens), None
     if isinstance(parsed, (list, tuple)):
-        return tuple(str(item) for item in _flatten(parsed))
-    return (str(parsed),)
+        return tuple(str(item) for item in _flatten(parsed)), None
+    return (str(parsed),), None
 
 
 def _parse_tokens(value: Any) -> tuple[str, ...]:
@@ -684,6 +711,161 @@ def _flatten(items: Any) -> list[Any]:
         else:
             flat.append(item)
     return flat
+
+
+def _trim_by_active_indices(
+    values: tuple[Any, ...],
+    active_indices: tuple[int, ...] | None,
+) -> tuple[Any, ...]:
+    if not active_indices:
+        return values
+    if max(active_indices) >= len(values):
+        return values
+    return tuple(values[index] for index in active_indices)
+
+
+def _looks_like_atomic_number_sequence(parsed: Any) -> bool:
+    if not isinstance(parsed, (list, tuple)):
+        return False
+    flat = _flatten(parsed)
+    return bool(flat) and all(_is_number_token(item) for item in flat)
+
+
+def _is_number_token(value: Any) -> bool:
+    try:
+        number = float(str(value))
+    except ValueError:
+        return False
+    return number.is_integer() and 0 <= int(number) < len(_ELEMENT_SYMBOLS)
+
+
+def _element_symbol(atomic_number: int) -> str:
+    if not 0 < atomic_number < len(_ELEMENT_SYMBOLS):
+        return str(atomic_number)
+    return _ELEMENT_SYMBOLS[atomic_number]
+
+
+_ELEMENT_SYMBOLS = (
+    "",
+    "H",
+    "He",
+    "Li",
+    "Be",
+    "B",
+    "C",
+    "N",
+    "O",
+    "F",
+    "Ne",
+    "Na",
+    "Mg",
+    "Al",
+    "Si",
+    "P",
+    "S",
+    "Cl",
+    "Ar",
+    "K",
+    "Ca",
+    "Sc",
+    "Ti",
+    "V",
+    "Cr",
+    "Mn",
+    "Fe",
+    "Co",
+    "Ni",
+    "Cu",
+    "Zn",
+    "Ga",
+    "Ge",
+    "As",
+    "Se",
+    "Br",
+    "Kr",
+    "Rb",
+    "Sr",
+    "Y",
+    "Zr",
+    "Nb",
+    "Mo",
+    "Tc",
+    "Ru",
+    "Rh",
+    "Pd",
+    "Ag",
+    "Cd",
+    "In",
+    "Sn",
+    "Sb",
+    "Te",
+    "I",
+    "Xe",
+    "Cs",
+    "Ba",
+    "La",
+    "Ce",
+    "Pr",
+    "Nd",
+    "Pm",
+    "Sm",
+    "Eu",
+    "Gd",
+    "Tb",
+    "Dy",
+    "Ho",
+    "Er",
+    "Tm",
+    "Yb",
+    "Lu",
+    "Hf",
+    "Ta",
+    "W",
+    "Re",
+    "Os",
+    "Ir",
+    "Pt",
+    "Au",
+    "Hg",
+    "Tl",
+    "Pb",
+    "Bi",
+    "Po",
+    "At",
+    "Rn",
+    "Fr",
+    "Ra",
+    "Ac",
+    "Th",
+    "Pa",
+    "U",
+    "Np",
+    "Pu",
+    "Am",
+    "Cm",
+    "Bk",
+    "Cf",
+    "Es",
+    "Fm",
+    "Md",
+    "No",
+    "Lr",
+    "Rf",
+    "Db",
+    "Sg",
+    "Bh",
+    "Hs",
+    "Mt",
+    "Ds",
+    "Rg",
+    "Cn",
+    "Nh",
+    "Fl",
+    "Mc",
+    "Lv",
+    "Ts",
+    "Og",
+)
 
 
 def _copy_sampling_metadata(row: dict[str, str], metadata: dict[str, Any]) -> None:
