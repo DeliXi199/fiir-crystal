@@ -123,3 +123,50 @@ example, a 64-core node with a three-formula config runs three CrystalFormer
 subprocesses concurrently and assigns thread counts such as `22, 21, 21`.
 Resolved allocations are recorded in `bulk_summary.json` and
 `generation_provenance.json`.
+
+## GPU Node Planning Policy
+
+Use `scripts/slurm/plan_gpu_job.py` before launching optional local MLIP or
+other GPU work. The planner is read-only by default: it inspects SLURM node
+state, ranks nodes by remaining GPU capacity, GPU model weight, idle CPU cores,
+and free memory, then prints an `sbatch` command. It submits only when
+`--run-sbatch` is passed explicitly.
+
+For CUDA PyTorch jobs, the default `--accelerator cuda` ignores AMD and Intel
+GPU partitions so a CUDA environment is not accidentally placed on the wrong
+hardware. Override with `--accelerator any` for non-CUDA workflows.
+
+```bash
+python scripts/slurm/plan_gpu_job.py \
+  --accelerator cuda \
+  --job-name fiir-mlip-gpu-smoke \
+  --time 00:30:00 \
+  --submit-script scripts/slurm/run_mlip_gpu_smoke.slurm \
+  --output-json outputs/slurm_gpu_plans/mlip_gpu_smoke_plan.json
+```
+
+The generated plan requests one node, pins the selected node with `--nodelist`,
+requests all currently free GPUs with `--gres`, and requests all currently free
+CPU cores. For a fully idle node it also adds `--exclusive`; for a partially
+used `MIXED` node it requests only the remaining free resources and does not
+try to take resources already allocated to other jobs.
+
+Useful options:
+
+- `--partition gpu4090_8`: restrict selection to one or more partitions.
+- `--layout single-task`: one task receives all selected CPUs and GPUs.
+- `--layout one-task-per-gpu`: one task per free GPU, with CPU cores divided
+  across tasks.
+- `--min-gpus`, `--min-cpus`, `--min-memory-mb`: minimum remaining resources.
+- `--gpu-weight h200=260`: tune the per-GPU ranking weight.
+- `--print-json`: print the full deterministic plan.
+- `--run-sbatch`: submit the planned command; off by default.
+
+The planner exports these values into the SLURM job environment:
+
+- `FIIR_GPU_NODE`
+- `FIIR_GPU_PARTITION`
+- `FIIR_TOTAL_GPUS`
+- `FIIR_TOTAL_CPU_CORES`
+- `FIIR_GPU_MODEL`
+- `FIIR_GPU_GRES`

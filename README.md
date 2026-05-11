@@ -265,6 +265,22 @@ See `docs/setup/mlip_validation_workspace.md`. Without normalized and imported
 local evidence, F3 remains unavailable/unknown and no candidate should be
 reported as stable.
 
+For SLURM GPU runs, plan the allocation before submitting work:
+
+```bash
+python scripts/slurm/plan_gpu_job.py \
+  --accelerator cuda \
+  --job-name fiir-mlip-gpu-smoke \
+  --time 00:30:00 \
+  --submit-script scripts/slurm/run_mlip_gpu_smoke.slurm \
+  --output-json outputs/slurm_gpu_plans/mlip_gpu_smoke_plan.json
+```
+
+The planner checks current node resources, selects the highest-scoring
+CUDA-compatible node, and builds an `sbatch` command that requests all currently
+free GPUs and CPU cores on that node. It is read-only unless `--run-sbatch` is
+passed explicitly.
+
 ## CrystalFormer Bulk Generation
 
 Bulk orchestration is for existing-checkpoint CrystalFormer generation. It

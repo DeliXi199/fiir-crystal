@@ -60,6 +60,31 @@ The script writes:
 It does not import MLIP packages and does not run calculations. If
 `--run-mlip` is supplied today, the script exits with a clear boundary error.
 
+## GPU Scheduling Plan
+
+Before launching real local MLIP calculations on SLURM, use the GPU planner to
+select a node with available resources. The planner is read-only unless
+`--run-sbatch` is explicitly supplied. It checks SLURM node state, filters to
+CUDA-compatible GPU partitions by default, ranks nodes by remaining GPU count,
+GPU model weight, idle CPU cores, and free memory, then emits an `sbatch`
+command that requests all currently free GPUs and CPUs on the selected node.
+
+```bash
+python scripts/slurm/plan_gpu_job.py \
+  --accelerator cuda \
+  --job-name fiir-mlip-gpu-smoke \
+  --time 00:30:00 \
+  --submit-script scripts/slurm/run_mlip_gpu_smoke.slurm \
+  --output-json outputs/slurm_gpu_plans/mlip_gpu_smoke_plan.json
+```
+
+For an idle node, the generated command includes `--exclusive` and uses the
+whole node. For a partially used `MIXED` node, it requests only the remaining
+free GPU and CPU resources. The selected job receives `FIIR_TOTAL_GPUS`,
+`FIIR_TOTAL_CPU_CORES`, `FIIR_GPU_NODE`, `FIIR_GPU_PARTITION`, and
+`FIIR_GPU_GRES` in its environment so downstream runners can size worker pools
+without hard-coded node assumptions.
+
 ## Suggested Install Order For Later
 
 Install one validator at a time in a separate environment:
