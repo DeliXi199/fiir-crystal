@@ -283,10 +283,18 @@ FIIR_OUTPUT_ROOT=outputs/crystalformer_bulk_real_smoke_perovskite_10x400 \
 bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
-For longer generation jobs, watch `squeue`, the SLURM stdout file, and the
-SLURM stderr file under `logs/slurm/` for the first five minutes. If the job is
-still running cleanly, leave it to finish under SLURM and inspect
-`bulk_summary.json` afterward.
+For longer generation jobs, watch only the startup window with the SLURM
+monitor:
+
+```bash
+scripts/slurm/monitor_slurm_startup.sh --job-id <job-id>
+```
+
+Use the default 120-second window for stable long jobs. Use
+`--seconds 300` for a new template, new environment, or new scale. The monitor
+checks `squeue`, stdout, and stderr under `logs/slurm/`; if the job is still
+listed and stderr is empty after that startup window, leave it to finish under
+SLURM and inspect `bulk_summary.json` afterward.
 
 By default, the SLURM wrapper passes `FIIR_TOTAL_CPU_CORES=$ncpu` to the bulk
 runner. The runner uses that budget for formula-level concurrency plus

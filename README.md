@@ -323,8 +323,16 @@ bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
 For longer jobs, monitor `squeue` plus the corresponding `logs/slurm/` stdout
-and stderr for the first five minutes. If the job is still running cleanly, let
-SLURM finish it unattended and inspect `bulk_summary.json` afterward.
+and stderr through the startup monitor:
+
+```bash
+scripts/slurm/monitor_slurm_startup.sh --job-id <job-id>
+```
+
+Use the default 120-second window for stable long jobs. Use
+`--seconds 300` for a new template, new environment, or new scale. If the job
+is still listed and stderr is empty after that startup window, let SLURM finish
+it unattended and inspect `bulk_summary.json` afterward.
 
 The SLURM template now passes the full node CPU budget to the runner. With
 `--run-generation`, the runner automatically runs formulas concurrently and

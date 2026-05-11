@@ -51,6 +51,23 @@ def test_crystalformer_policy_submitter_encodes_partition_order() -> None:
     assert 'mkdir -p "$FIIR_SLURM_LOG_DIR"' in text
     assert '--output "${FIIR_SLURM_LOG_DIR}/%x_%j.log"' in text
     assert '--error "${FIIR_SLURM_LOG_DIR}/%x_%j.err"' in text
+    assert "monitor_slurm_startup.sh --job-id" in text
+    assert "Submitted batch job" in text
+
+
+def test_slurm_startup_monitor_encodes_long_job_watch_policy() -> None:
+    script = Path("scripts/slurm/monitor_slurm_startup.sh")
+    text = script.read_text(encoding="utf-8")
+
+    assert "FIIR_STARTUP_MONITOR_SECONDS:-120" in text
+    assert "FIIR_STARTUP_MONITOR_MAX_SECONDS:-300" in text
+    assert "FIIR_STARTUP_MONITOR_INTERVAL_SECONDS:-30" in text
+    assert "squeue" in text
+    assert "logs/slurm" in text
+    assert "job_not_listed" in text
+    assert "non-empty stderr" in text
+    assert "Startup monitor window passed" in text
+    assert "Leave the job to SLURM" in text
 
 
 def test_slurm_logs_are_gitignored() -> None:

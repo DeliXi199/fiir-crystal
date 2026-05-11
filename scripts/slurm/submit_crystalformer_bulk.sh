@@ -138,4 +138,12 @@ if [ "$FIIR_DRY_RUN" = "1" ] || [ "$FIIR_DRY_RUN" = "true" ]; then
   exit 0
 fi
 
-sbatch "${sbatch_args[@]}" "$FIIR_SUBMIT_SCRIPT"
+submit_output="$(sbatch "${sbatch_args[@]}" "$FIIR_SUBMIT_SCRIPT")"
+echo "$submit_output"
+
+job_id="$(printf '%s\n' "$submit_output" | awk '/Submitted batch job/ { print $4; exit }')"
+if [ -n "$job_id" ]; then
+  echo "Startup monitor command:"
+  echo "  scripts/slurm/monitor_slurm_startup.sh --job-id ${job_id}"
+  echo "  For new templates, new environments, or new scales, use: scripts/slurm/monitor_slurm_startup.sh --job-id ${job_id} --seconds 300"
+fi

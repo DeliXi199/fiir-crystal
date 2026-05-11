@@ -66,6 +66,35 @@ The wrapper creates the log directory before submission and writes SLURM logs
 as `logs/slurm/%x_%j.log` and `logs/slurm/%x_%j.err` by default. Direct
 `sbatch` uses the same default log directory. These logs are ignored by git.
 
+## Startup Monitoring For Longer Jobs
+
+For jobs expected to run longer than a few minutes, monitor only the startup
+window, then leave the job to SLURM:
+
+```bash
+scripts/slurm/monitor_slurm_startup.sh --job-id <job-id>
+```
+
+The submitter prints this command after `sbatch` returns a job id. The default
+startup window is 120 seconds. Use up to 300 seconds for a new template, new
+environment, or new scale:
+
+```bash
+scripts/slurm/monitor_slurm_startup.sh --job-id <job-id> --seconds 300
+```
+
+The monitor checks `squeue`, tails the matching stdout/stderr files under
+`logs/slurm/`, and exits with a failure if stderr becomes non-empty. If the job
+is still listed by `squeue` and stderr is empty after the startup window, stop
+watching it interactively and inspect the expected summary artifact after the
+job finishes.
+
+For CrystalFormer bulk runs, the expected final summary is usually:
+
+```text
+<FIIR_OUTPUT_ROOT>/bulk_summary.json
+```
+
 When `FIIR_RUN_GENERATION=1`, `auto` parallelism uses the full CPU budget. For
 example, a 64-core node with a three-formula config runs three CrystalFormer
 subprocesses concurrently and assigns thread counts such as `22, 21, 21`.
