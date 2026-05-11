@@ -1,6 +1,6 @@
 {
   "crystalformer_work_dir": "external/CrystalFormer",
-  "checkpoint_dir": "external/checkpoints/crystalformer",
+  "checkpoint_dir": "external/checkpoints/crystalformer/alex20s_csp",
   "output_root": "outputs/crystalformer_bulk_real_smoke",
   "parser_backend": "none",
   "stability_mode": "unavailable_without_offline_validation",
@@ -10,7 +10,7 @@
     "num_samples": 5,
     "top_k": 40
   },
-  "command_template": "python ./main.py --optimizer none --restore_path {checkpoint_dir} --K {top_k} --num_samples {num_samples} --formula {formula} --save_path {raw_output_dir}",
+  "command_template": "python ./main.py --optimizer none --restore_path {checkpoint_dir} --K {top_k} --num_samples {num_samples} --formula {formula} --save_path {raw_output_dir}/output.csv",
   "formulas": [
     {
       "formula": "BaTiO3",

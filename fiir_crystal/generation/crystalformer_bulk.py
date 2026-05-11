@@ -228,6 +228,7 @@ def _run_plan_item(
     formula = str(item["formula"])
     formula_dir = config.output_root / "formula_runs" / formula
     formula_dir.mkdir(parents=True, exist_ok=True)
+    Path(str(item["raw_output_dir"])).mkdir(parents=True, exist_ok=True)
     provenance_path = formula_dir / "generation_provenance.json"
     row: dict[str, Any] = {
         "formula": formula,
@@ -338,10 +339,13 @@ def _bulk_validation_summary(
     work_dir_exists = config.crystalformer_work_dir.exists()
     checkpoint_dir_exists = config.checkpoint_dir.exists()
     checkpoint_referenced = "checkpoint_dir" in fields
+    checkpoint_files = _checkpoint_files(config.checkpoint_dir)
     if not work_dir_exists:
         blocking_reasons.append(f"crystalformer_work_dir_missing:{config.crystalformer_work_dir}")
     if checkpoint_referenced and not checkpoint_dir_exists:
         blocking_reasons.append(f"checkpoint_dir_missing:{config.checkpoint_dir}")
+    elif checkpoint_referenced and not checkpoint_files:
+        blocking_reasons.append(f"checkpoint_file_missing:{config.checkpoint_dir}")
     elif not checkpoint_dir_exists:
         warnings.append(f"checkpoint_dir_missing_but_not_referenced:{config.checkpoint_dir}")
     if not plan:
@@ -387,6 +391,8 @@ def _bulk_validation_summary(
             "checkpoint_dir": str(config.checkpoint_dir),
             "checkpoint_dir_exists": checkpoint_dir_exists,
             "checkpoint_dir_referenced_by_template": checkpoint_referenced,
+            "checkpoint_file_count": len(checkpoint_files),
+            "checkpoint_files": checkpoint_files,
         },
         "items": per_formula,
     }
@@ -576,6 +582,14 @@ def _has_existing_raw_output(path: Path) -> bool:
     if path.is_file():
         return path.stat().st_size > 0
     return any(child.is_file() for child in path.iterdir())
+
+
+def _checkpoint_files(path: Path) -> list[str]:
+    if path.is_file():
+        return [str(path)]
+    if path.is_dir():
+        return [str(candidate) for candidate in sorted(path.glob("*.pkl"))]
+    return []
 
 
 def _with_output_override(

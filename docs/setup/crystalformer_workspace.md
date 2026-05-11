@@ -94,17 +94,18 @@ manage the CrystalFormer environment.
 
 ## Small Batch Generation Example
 
-Run this from `external/CrystalFormer` after placing a checkpoint under
-`../checkpoints/crystalformer`:
+Run this from `external/CrystalFormer` after placing a checkpoint directory
+with direct `*.pkl` files under `../checkpoints/crystalformer/alex20s_csp`:
 
 ```bash
+mkdir -p ../../outputs/crystalformer_raw/BaTiO3
 python ./main.py \
   --optimizer none \
-  --restore_path ../checkpoints/crystalformer \
+  --restore_path ../checkpoints/crystalformer/alex20s_csp \
   --K 40 \
   --num_samples 100 \
   --formula BaTiO3 \
-  --save_path ../../outputs/crystalformer_raw/BaTiO3
+  --save_path ../../outputs/crystalformer_raw/BaTiO3/output.csv
 ```
 
 This is only a small local generation example. It is not FIIR training, not DPO
@@ -219,10 +220,11 @@ python scripts/run_crystalformer_bulk_generation.py \
 ```
 
 This expands commands, checks `external/CrystalFormer`, checks a referenced
-checkpoint directory such as `external/checkpoints/crystalformer`, and writes
-`bulk_validation_summary.json`. Missing paths are reported as blocking
-readiness issues. Validate-only never runs CrystalFormer and never enters the
-smoke pipeline.
+checkpoint directory such as `external/checkpoints/crystalformer/alex20s_csp`,
+checks for direct `*.pkl` checkpoint files, and writes
+`bulk_validation_summary.json`. Missing paths or checkpoint files are reported
+as blocking readiness issues. Validate-only never runs CrystalFormer and never
+enters the smoke pipeline.
 
 Then run a small explicit generation batch:
 

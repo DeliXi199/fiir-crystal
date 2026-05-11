@@ -82,9 +82,11 @@ def test_real_example_config_validate_only_is_template_safe(tmp_path) -> None:
     assert summary["total_num_samples"] == 5
     assert summary["items"][0]["formula"] == "BaTiO3"
     assert "python ./main.py" in summary["items"][0]["command"]
+    assert summary["items"][0]["command"].endswith("/output.csv")
     assert Path(summary["items"][0]["raw_output_dir"]).is_absolute()
-    assert str(Path("external/checkpoints/crystalformer").resolve()) in summary["items"][0]["command"]
+    assert str(Path("external/checkpoints/crystalformer/alex20s_csp").resolve()) in summary["items"][0]["command"]
     assert "checkpoint_dir_referenced_by_template" in summary["workspace"]
+    assert "checkpoint_file_count" in summary["workspace"]
 
 
 def test_validate_only_reports_missing_referenced_checkpoint_as_blocking(tmp_path) -> None:
@@ -106,6 +108,29 @@ def test_validate_only_reports_missing_referenced_checkpoint_as_blocking(tmp_pat
 
     assert result["summary"]["ready_for_generation"] is False
     assert any(reason.startswith("checkpoint_dir_missing:") for reason in result["summary"]["blocking_reasons"])
+
+
+def test_validate_only_reports_empty_referenced_checkpoint_dir_as_blocking(tmp_path) -> None:
+    work_dir = tmp_path / "CrystalFormer"
+    checkpoint_dir = tmp_path / "empty_checkpoint"
+    work_dir.mkdir()
+    checkpoint_dir.mkdir()
+    config = {
+        "crystalformer_work_dir": str(work_dir),
+        "checkpoint_dir": str(checkpoint_dir),
+        "command_template": (
+            "python ./main.py --restore_path {checkpoint_dir} "
+            "--formula {formula} --save_path {raw_output_dir}/output.csv"
+        ),
+        "formulas": [{"formula": "BaTiO3", "num_samples": 1}],
+    }
+    path = tmp_path / "real_empty_checkpoint.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+
+    result = main(["--config", str(path), "--output-root", str(tmp_path / "validate"), "--validate-only"])
+
+    assert result["summary"]["ready_for_generation"] is False
+    assert any(reason.startswith("checkpoint_file_missing:") for reason in result["summary"]["blocking_reasons"])
 
 
 def test_command_template_missing_required_fields_errors(tmp_path) -> None:
