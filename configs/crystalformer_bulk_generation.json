@@ -1,0 +1,24 @@
+{
+  "crystalformer_work_dir": ".",
+  "checkpoint_dir": "external/checkpoints",
+  "output_root": "outputs/crystalformer_bulk_fake",
+  "parser_backend": "none",
+  "stability_mode": "unavailable_without_offline_validation",
+  "source_format": "auto",
+  "skip_existing": true,
+  "defaults": {
+    "num_samples": 5,
+    "top_k": 40
+  },
+  "command_template": "python examples/crystalformer_bulk/fake_generate.py --formula {formula} --num-samples {num_samples} --top-k {top_k} --output-dir {raw_output_dir}",
+  "formulas": [
+    {
+      "formula": "BaTiO3",
+      "num_samples": 5
+    },
+    {
+      "formula": "SrTiO3",
+      "num_samples": 3
+    }
+  ]
+}

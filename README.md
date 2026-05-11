@@ -234,6 +234,50 @@ generation condition. Failed or mismatched rows are counted in the import
 summary and do not make F3 available. This is still not DFT, not MLIP, and not
 DPO training.
 
+## CrystalFormer Bulk Generation
+
+Bulk orchestration is for existing-checkpoint CrystalFormer generation. It
+plans one explicit command per formula and can route each completed formula
+through the smoke pipeline. It is not DPO training.
+
+Dry-run is the default:
+
+```bash
+python scripts/run_crystalformer_bulk_generation.py \
+  --config configs/crystalformer_bulk_generation.json \
+  --output-root outputs/crystalformer_bulk_fake
+```
+
+Validate a real-command template before submitting generation:
+
+```bash
+python scripts/run_crystalformer_bulk_generation.py \
+  --config configs/crystalformer_bulk_generation.real.example.json \
+  --output-root outputs/crystalformer_bulk_real_validate \
+  --validate-only
+```
+
+Validate-only writes `bulk_plan.json`, `bulk_validation_summary.json`, and
+`validate_report.md`. Missing `external/CrystalFormer` or a referenced
+checkpoint directory is reported as a blocking readiness issue, but no
+CrystalFormer command or smoke audit is run.
+
+Run generation only when explicitly requested:
+
+```bash
+python scripts/run_crystalformer_bulk_generation.py \
+  --config configs/crystalformer_bulk_generation.real.example.json \
+  --output-root outputs/crystalformer_bulk_real_smoke \
+  --run-generation
+```
+
+The example config uses `examples/crystalformer_bulk/fake_generate.py` so tests
+remain offline and stdlib-only. The real example config is a template for an
+existing local CrystalFormer workspace and checkpoint; it is not expected to
+run until those paths are prepared. Each formula writes generation provenance,
+smoke audit outputs, DPO preference artifacts, and a bulk `bulk_summary.json` /
+`report.md`.
+
 ## Smoke Audit for CrystalFormer Outputs
 
 Run a smoke audit over real CrystalFormer output files:
@@ -332,7 +376,8 @@ plus `feedback_buffer.jsonl`, `active_loop_state.json`,
 - `fiir_crystal.fsal`: matched pair mining and baseline pair construction.
 - `fiir_crystal.discovery`: mock screening, ranking, validation-task metadata, and feedback.
 - `fiir_crystal.structures`: stdlib-only standard structure records for external outputs.
-- `fiir_crystal.generation`: generator interfaces and external adapter boundaries.
+- `fiir_crystal.generation`: generator interfaces, CrystalFormer smoke pipeline,
+  workspace checks, and bulk orchestration.
 - `fiir_crystal.evaluation`: experiment metrics and JSON-serializable reports.
 - `fiir_crystal.io`: JSON/JSONL helpers.
 - `fiir_crystal.config`: lightweight config loader.
@@ -361,7 +406,8 @@ plus `feedback_buffer.jsonl`, `active_loop_state.json`,
 Phase A: real-smoke pipeline
 
 - Keep the CrystalFormer smoke pipeline reproducible on fake and local raw outputs.
-- Expand fixture coverage only with tiny fake outputs or user-provided local artifacts.
+- Use validate-only bulk orchestration and the SLURM test template to move from
+  single-formula smoke tests to small multi-formula existing-checkpoint runs.
 
 Phase B: offline validation / MLIP import boundary
 

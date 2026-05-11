@@ -199,6 +199,46 @@ If the command or workdir is missing, the pipeline exits with a clear error.
 Without imported offline validation, F3 is reported as unavailable/unknown and
 no candidate is reported as stable.
 
+## Bulk Generation Orchestration
+
+After one formula works, prepare a bulk dry-run:
+
+```bash
+python scripts/run_crystalformer_bulk_generation.py \
+  --config configs/crystalformer_bulk_generation.json \
+  --output-root outputs/crystalformer_bulk_fake
+```
+
+Validate the real-command template before submitting work to a test node:
+
+```bash
+python scripts/run_crystalformer_bulk_generation.py \
+  --config configs/crystalformer_bulk_generation.real.example.json \
+  --output-root outputs/crystalformer_bulk_real_validate \
+  --validate-only
+```
+
+This expands commands, checks `external/CrystalFormer`, checks a referenced
+checkpoint directory such as `external/checkpoints/crystalformer`, and writes
+`bulk_validation_summary.json`. Missing paths are reported as blocking
+readiness issues. Validate-only never runs CrystalFormer and never enters the
+smoke pipeline.
+
+Then run a small explicit generation batch:
+
+```bash
+python scripts/run_crystalformer_bulk_generation.py \
+  --config configs/crystalformer_bulk_generation.real.example.json \
+  --output-root outputs/crystalformer_bulk_real_smoke \
+  --run-generation
+```
+
+The default checked-in config uses a fake stdlib-only generator. The real
+example config keeps `num_samples` small and assumes a prepared external
+CrystalFormer workspace plus checkpoint. Use `--only-formula BaTiO3` for a
+single formula, `--no-skip-existing` to force regeneration, and
+`--continue-on-error` only when you want later formulas to run after a failure.
+
 ## FIIR Smoke Audit Example
 
 Return to the FIIR Crystal repository root and audit the generated files:
