@@ -344,6 +344,49 @@ With `FIIR_GENERATION_CPU_THREADS=auto`, the runner assigns all available node
 cores across those 16 subprocesses: 4 threads each on a 64-core node, or a
 3/4-thread mix on `regular`'s 56 cores.
 
+For multi-node generation, use formula-bank shards rather than one multi-node
+job. The checked-in bank and generated shard configs are:
+
+```text
+configs/formula_banks/perovskite_128.json
+configs/generated/crystalformer_shards/perovskite_128_32x1600/shard_001.json
+configs/generated/crystalformer_shards/perovskite_128_32x1600/shard_002.json
+configs/generated/crystalformer_shards/perovskite_128_32x1600/shard_003.json
+configs/generated/crystalformer_shards/perovskite_128_32x1600/shard_004.json
+```
+
+Each shard is a one-node job with `32 formulas x 1600 samples = 51200`
+structures. Submitting all four shards produces 204800 structures and can use
+up to four nodes concurrently:
+
+```bash
+for shard in configs/generated/crystalformer_shards/perovskite_128_32x1600/shard_[0-9][0-9][0-9].json; do
+  name="$(basename "${shard}" .json)"
+  FIIR_CONDA_ENV=crystalformer \
+  FIIR_RUN_GENERATION=1 \
+  FIIR_CONTINUE_ON_ERROR=1 \
+  FIIR_EXPECTED_MINUTES=180 \
+  FIIR_TIME_LIMIT=04:00:00 \
+  FIIR_SKIP_EXISTING_MODE=no-skip \
+  FIIR_MAX_CONCURRENT_GENERATIONS=16 \
+  FIIR_BULK_CONFIG="${shard}" \
+  FIIR_OUTPUT_ROOT="outputs/crystalformer_bulk_real_smoke_perovskite_128_32x1600_${name}" \
+  bash scripts/slurm/submit_crystalformer_bulk.sh
+done
+```
+
+To regenerate shard configs from the bank:
+
+```bash
+python scripts/make_crystalformer_bulk_shards.py \
+  --formula-bank configs/formula_banks/perovskite_128.json \
+  --formulas-per-shard 32 \
+  --num-samples 1600 \
+  --top-k 40 \
+  --output-dir configs/generated/crystalformer_shards/perovskite_128_32x1600 \
+  --output-root-prefix outputs/crystalformer_bulk_real_smoke_perovskite_128_32x1600
+```
+
 For longer jobs, monitor `squeue` plus the corresponding `logs/slurm/` stdout
 and stderr through the startup monitor:
 

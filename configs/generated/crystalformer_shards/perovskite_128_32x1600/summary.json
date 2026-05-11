@@ -1,0 +1,14 @@
+{
+  "formula_bank": "configs/formula_banks/perovskite_128.json",
+  "formula_count": 128,
+  "shard_count": 4,
+  "formulas_per_shard": 32,
+  "num_samples": 1600,
+  "total_num_samples": 204800,
+  "shard_files": [
+    "configs/generated/crystalformer_shards/perovskite_128_32x1600/shard_001.json",
+    "configs/generated/crystalformer_shards/perovskite_128_32x1600/shard_002.json",
+    "configs/generated/crystalformer_shards/perovskite_128_32x1600/shard_003.json",
+    "configs/generated/crystalformer_shards/perovskite_128_32x1600/shard_004.json"
+  ]
+}

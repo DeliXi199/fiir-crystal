@@ -40,6 +40,25 @@ FIIR_BULK_CONFIG=configs/crystalformer_bulk_generation.real.example.json \
 bash scripts/slurm/submit_crystalformer_bulk.sh
 ```
 
+For multi-node generation, submit independent one-node shard configs. The
+checked-in perovskite 128 bank is split into four 32-formula shard configs:
+
+```bash
+for shard in configs/generated/crystalformer_shards/perovskite_128_32x1600/shard_[0-9][0-9][0-9].json; do
+  name="$(basename "${shard}" .json)"
+  FIIR_CONDA_ENV=crystalformer \
+  FIIR_RUN_GENERATION=1 \
+  FIIR_CONTINUE_ON_ERROR=1 \
+  FIIR_EXPECTED_MINUTES=180 \
+  FIIR_TIME_LIMIT=04:00:00 \
+  FIIR_SKIP_EXISTING_MODE=no-skip \
+  FIIR_MAX_CONCURRENT_GENERATIONS=16 \
+  FIIR_BULK_CONFIG="${shard}" \
+  FIIR_OUTPUT_ROOT="outputs/crystalformer_bulk_real_smoke_perovskite_128_32x1600_${name}" \
+  bash scripts/slurm/submit_crystalformer_bulk.sh
+done
+```
+
 Common overrides:
 
 - `FIIR_BULK_CONFIG`: bulk generation JSON config path.

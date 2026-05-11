@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.make_crystalformer_bulk_shards import load_formula_bank, main as make_shards_main
 from scripts.run_crystalformer_bulk_generation import main
 
 
@@ -194,6 +195,71 @@ def test_real_perovskite_32x1600_3h_example_config_validate_only_is_template_saf
     assert [item["num_samples"] for item in summary["items"]] == [1600] * 32
     assert summary["items"][0]["formula"] == "BaTiO3"
     assert summary["items"][-1]["formula"] == "PbThO3"
+
+
+def test_perovskite_128_formula_bank_is_unique() -> None:
+    formulas = load_formula_bank(Path("configs/formula_banks/perovskite_128.json"))
+
+    assert len(formulas) == 128
+    assert len(set(formulas)) == 128
+    assert formulas[:4] == ["BaTiO3", "SrTiO3", "CaTiO3", "PbTiO3"]
+    assert formulas[-4:] == ["CsSbO3", "AgSbO3", "CuSbO3", "TlSbO3"]
+
+
+def test_make_crystalformer_bulk_shards_from_formula_bank(tmp_path) -> None:
+    output_dir = tmp_path / "shards"
+
+    summary = make_shards_main(
+        [
+            "--formula-bank",
+            "configs/formula_banks/perovskite_128.json",
+            "--formulas-per-shard",
+            "32",
+            "--num-samples",
+            "1600",
+            "--output-dir",
+            str(output_dir),
+            "--output-root-prefix",
+            "outputs/test_perovskite_128_32x1600",
+        ]
+    )
+
+    assert summary["formula_count"] == 128
+    assert summary["shard_count"] == 4
+    assert summary["total_num_samples"] == 204800
+    shard = json.loads((output_dir / "shard_001.json").read_text(encoding="utf-8"))
+    assert shard["defaults"]["num_samples"] == 1600
+    assert shard["output_root"] == "outputs/test_perovskite_128_32x1600_shard_001"
+    assert len(shard["formulas"]) == 32
+
+
+def test_generated_perovskite_128_shards_validate_only_are_template_safe(tmp_path) -> None:
+    shard_paths = sorted(
+        Path("configs/generated/crystalformer_shards/perovskite_128_32x1600").glob(
+            "shard_[0-9][0-9][0-9].json"
+        )
+    )
+    total_num_samples = 0
+
+    assert len(shard_paths) == 4
+    for shard_path in shard_paths:
+        result = main(
+            [
+                "--config",
+                str(shard_path),
+                "--output-root",
+                str(tmp_path / shard_path.stem),
+                "--validate-only",
+            ]
+        )
+        summary = result["summary"]
+        assert summary["validate_only"] is True
+        assert summary["formula_count"] == 32
+        assert summary["total_num_samples"] == 51200
+        assert [item["num_samples"] for item in summary["items"]] == [1600] * 32
+        total_num_samples += summary["total_num_samples"]
+
+    assert total_num_samples == 204800
 
 
 def test_validate_only_reports_missing_referenced_checkpoint_as_blocking(tmp_path) -> None:

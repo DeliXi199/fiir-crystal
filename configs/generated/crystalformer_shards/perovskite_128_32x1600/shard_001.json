@@ -1,0 +1,112 @@
+{
+  "crystalformer_work_dir": "external/CrystalFormer",
+  "checkpoint_dir": "external/checkpoints/crystalformer/alex20s_csp",
+  "output_root": "outputs/crystalformer_bulk_real_smoke_perovskite_128_32x1600_shard_001",
+  "parser_backend": "none",
+  "stability_mode": "unavailable_without_offline_validation",
+  "source_format": "auto",
+  "skip_existing": true,
+  "defaults": {
+    "num_samples": 1600,
+    "top_k": 40
+  },
+  "command_template": "python ./main.py --optimizer none --restore_path {checkpoint_dir} --K {top_k} --num_samples {num_samples} --formula {formula} --save_path {raw_output_dir}/output.csv",
+  "formulas": [
+    {
+      "formula": "BaTiO3"
+    },
+    {
+      "formula": "SrTiO3"
+    },
+    {
+      "formula": "CaTiO3"
+    },
+    {
+      "formula": "PbTiO3"
+    },
+    {
+      "formula": "BaZrO3"
+    },
+    {
+      "formula": "SrZrO3"
+    },
+    {
+      "formula": "CaZrO3"
+    },
+    {
+      "formula": "PbZrO3"
+    },
+    {
+      "formula": "BaHfO3"
+    },
+    {
+      "formula": "SrHfO3"
+    },
+    {
+      "formula": "CaHfO3"
+    },
+    {
+      "formula": "PbHfO3"
+    },
+    {
+      "formula": "BaSnO3"
+    },
+    {
+      "formula": "SrSnO3"
+    },
+    {
+      "formula": "CaSnO3"
+    },
+    {
+      "formula": "PbSnO3"
+    },
+    {
+      "formula": "BaCeO3"
+    },
+    {
+      "formula": "SrCeO3"
+    },
+    {
+      "formula": "CaCeO3"
+    },
+    {
+      "formula": "PbCeO3"
+    },
+    {
+      "formula": "BaGeO3"
+    },
+    {
+      "formula": "SrGeO3"
+    },
+    {
+      "formula": "CaGeO3"
+    },
+    {
+      "formula": "PbGeO3"
+    },
+    {
+      "formula": "BaSiO3"
+    },
+    {
+      "formula": "SrSiO3"
+    },
+    {
+      "formula": "CaSiO3"
+    },
+    {
+      "formula": "PbSiO3"
+    },
+    {
+      "formula": "BaThO3"
+    },
+    {
+      "formula": "SrThO3"
+    },
+    {
+      "formula": "CaThO3"
+    },
+    {
+      "formula": "PbThO3"
+    }
+  ]
+}
