@@ -9,6 +9,8 @@ def test_crystalformer_bulk_slurm_template_is_safe_by_default() -> None:
     assert "#SBATCH --partition=test" in text
     assert "#SBATCH --exclusive" in text
     assert "#SBATCH --ntasks-per-node=64" not in text
+    assert "#SBATCH --output=logs/slurm/%x_%j.log" in text
+    assert "#SBATCH --error=logs/slurm/%x_%j.err" in text
     assert "SLURM_CPUS_ON_NODE" in text
     assert 'FIIR_VALIDATE_ONLY="${FIIR_VALIDATE_ONLY:-0}"' in text
     assert "--validate-only" in text
@@ -45,6 +47,10 @@ def test_crystalformer_policy_submitter_encodes_partition_order() -> None:
     assert "--ntasks-per-node" in text
     assert "FIIR_TOTAL_CPU_CORES" in text
     assert "FIIR_DRY_RUN" in text
+    assert 'FIIR_SLURM_LOG_DIR="${FIIR_SLURM_LOG_DIR:-logs/slurm}"' in text
+    assert 'mkdir -p "$FIIR_SLURM_LOG_DIR"' in text
+    assert '--output "${FIIR_SLURM_LOG_DIR}/%x_%j.log"' in text
+    assert '--error "${FIIR_SLURM_LOG_DIR}/%x_%j.err"' in text
 
 
 def test_slurm_logs_are_gitignored() -> None:
@@ -54,3 +60,5 @@ def test_slurm_logs_are_gitignored() -> None:
     assert "slurm_*.err" in text
     assert "log_*.log" in text
     assert "err_*.err" in text
+    assert "logs/slurm/*.log" in text
+    assert "logs/slurm/*.err" in text

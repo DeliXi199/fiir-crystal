@@ -27,8 +27,8 @@
 #SBATCH --exclusive
 #SBATCH --partition=test
 #SBATCH --job-name=fiir-cf-test
-#SBATCH --output=./slurm_%x_%j.log
-#SBATCH --error=./slurm_%x_%j.err
+#SBATCH --output=logs/slurm/%x_%j.log
+#SBATCH --error=logs/slurm/%x_%j.err
 
 set -eo pipefail
 

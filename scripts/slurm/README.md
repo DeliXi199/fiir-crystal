@@ -60,9 +60,11 @@ Common overrides:
 - `FIIR_FORCE_PARTITION`: bypass policy and submit to one named partition.
 - `FIIR_DRY_RUN`: set to `1` or `true` to print the selected `sbatch` command without submitting.
 - `FIIR_TIME_LIMIT`: optional SLURM `--time` value.
+- `FIIR_SLURM_LOG_DIR`: directory for SLURM stdout/stderr files, default `logs/slurm`.
 
-The script writes SLURM logs as `slurm_%x_%j.log` and `slurm_%x_%j.err` in the
-submission directory. These logs are ignored by git.
+The wrapper creates the log directory before submission and writes SLURM logs
+as `logs/slurm/%x_%j.log` and `logs/slurm/%x_%j.err` by default. Direct
+`sbatch` uses the same default log directory. These logs are ignored by git.
 
 When `FIIR_RUN_GENERATION=1`, `auto` parallelism uses the full CPU budget. For
 example, a 64-core node with a three-formula config runs three CrystalFormer

@@ -18,6 +18,7 @@ FIIR_TEST_PARTITION="${FIIR_TEST_PARTITION:-test}"
 FIIR_DRY_RUN="${FIIR_DRY_RUN:-0}"
 FIIR_FORCE_PARTITION="${FIIR_FORCE_PARTITION:-}"
 FIIR_TIME_LIMIT="${FIIR_TIME_LIMIT:-}"
+FIIR_SLURM_LOG_DIR="${FIIR_SLURM_LOG_DIR:-logs/slurm}"
 
 partition_cores() {
   case "$1" in
@@ -115,6 +116,10 @@ if [ -n "$FIIR_TIME_LIMIT" ]; then
   sbatch_args+=(--time "$FIIR_TIME_LIMIT")
 fi
 
+mkdir -p "$FIIR_SLURM_LOG_DIR"
+sbatch_args+=(--output "${FIIR_SLURM_LOG_DIR}/%x_%j.log")
+sbatch_args+=(--error "${FIIR_SLURM_LOG_DIR}/%x_%j.err")
+
 echo "FIIR partition policy:"
 echo "  expected_minutes=${FIIR_EXPECTED_MINUTES}"
 echo "  short_task_minutes=${FIIR_SHORT_TASK_MINUTES}"
@@ -122,6 +127,7 @@ echo "  partition_order=${FIIR_PARTITION_ORDER}"
 echo "  selected_partition=${partition_arg}"
 echo "  selected_reason=${selected_reason}"
 echo "  selected_core_budget=${cores}"
+echo "  slurm_log_dir=${FIIR_SLURM_LOG_DIR}"
 echo "  submit_script=${FIIR_SUBMIT_SCRIPT}"
 
 printf 'sbatch command:'

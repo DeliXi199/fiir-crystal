@@ -23,3 +23,5 @@ slurm_*.log
 slurm_*.err
 log_*.log
 err_*.err
+logs/slurm/*.log
+logs/slurm/*.err
