@@ -432,7 +432,7 @@ def test_bulk_generation_gpu_parallelism_assigns_cuda_devices(tmp_path) -> None:
         assert provenance["generation_cpu_threads"] == 4
         assert provenance["generation_gpu_device"] == expected_device
         assert provenance["env_overrides"]["CUDA_VISIBLE_DEVICES"] == expected_device
-        assert provenance["env_overrides"]["JAX_PLATFORMS"] == "cuda"
+        assert provenance["env_overrides"]["JAX_PLATFORMS"] == "cuda,cpu"
         assert provenance["env_overrides"]["XLA_PYTHON_CLIENT_PREALLOCATE"] == "false"
         assert "intra_op_parallelism_threads=4" in provenance["env_overrides"]["XLA_FLAGS"]
 

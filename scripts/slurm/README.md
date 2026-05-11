@@ -66,7 +66,10 @@ job only writes a bulk plan or validation summary. It exports
 all currently free GPUs and CPU cores on the selected node, and passes
 `FIIR_TOTAL_GPUS` plus `CUDA_VISIBLE_DEVICES` into the bulk runner. The runner
 then assigns one visible CUDA device per concurrent CrystalFormer subprocess
-and divides the selected CPU cores across those subprocesses.
+and divides the selected CPU cores across those subprocesses. Generation
+subprocesses default to `JAX_PLATFORMS=cuda,cpu` because CrystalFormer sampling
+uses JAX callbacks that need a local CPU device while CUDA remains the primary
+backend.
 
 After validation is clean, run a small explicit GPU generation:
 

@@ -116,6 +116,48 @@ def test_collect_reports_partial_and_malformed_artifacts(tmp_path) -> None:
     assert any(error["issue"] == "missing_artifact" for error in errors)
 
 
+def test_collect_counts_empty_artifacts_separately_from_corruption(tmp_path) -> None:
+    root = tmp_path / "zero_pairs"
+    pref_dir = root / "smoke" / "dpo_preferences" / "BaTiO3"
+    pref_dir.mkdir(parents=True)
+    write_json(
+        root / "bulk_summary.json",
+        {
+            "items": [
+                {
+                    "formula": "BaTiO3",
+                    "status": "succeeded",
+                    "smoke_summary": {
+                        "candidate_count": 5,
+                        "dpo_eligible_count": 5,
+                        "preference_pair_count": 0,
+                    },
+                }
+            ]
+        },
+    )
+    (pref_dir / "preference_pairs.jsonl").write_text("", encoding="utf-8")
+    write_json(
+        pref_dir / "preference_summary.json",
+        {"pair_count": 0, "skip_reasons": {"no_comparable_margin": 10}},
+    )
+
+    result = main(
+        [
+            "--output-roots",
+            str(root),
+            "--output-dir",
+            str(tmp_path / "collection"),
+            "--include-in-progress",
+        ]
+    )
+
+    summary = result["summary"]
+    assert summary["empty_artifact_count"] == 1
+    assert summary["corrupt_artifact_count"] == 0
+    assert summary["total_preference_pairs"] == 0
+
+
 def test_collect_strict_exits_on_artifact_errors(tmp_path) -> None:
     root = tmp_path / "partial"
     root.mkdir()

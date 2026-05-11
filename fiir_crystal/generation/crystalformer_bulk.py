@@ -861,7 +861,9 @@ def _generation_env_overrides(item: dict[str, Any]) -> dict[str, str]:
         overrides["XLA_FLAGS"] = f"{xla_flags} {cpu_flags}".strip()
     if gpu_device:
         overrides["CUDA_VISIBLE_DEVICES"] = gpu_device
-        overrides["JAX_PLATFORMS"] = os.environ.get("JAX_PLATFORMS", "cuda")
+        # CrystalFormer sampling uses JAX callbacks that need a local CPU device
+        # even when the main compute backend is CUDA.
+        overrides["JAX_PLATFORMS"] = os.environ.get("JAX_PLATFORMS", "cuda,cpu")
         if "XLA_PYTHON_CLIENT_PREALLOCATE" not in os.environ:
             overrides["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
     return overrides

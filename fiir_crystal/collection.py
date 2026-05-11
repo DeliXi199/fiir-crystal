@@ -191,10 +191,7 @@ def collect_crystalformer_bulk_results(config: CollectionConfig) -> dict[str, An
     status_counts = Counter(row["status"] for row in all_rows)
     missing_count = sum(error.issue == "missing_artifact" for error in errors)
     empty_count = sum(error.issue == "empty_artifact" for error in errors)
-    corrupt_count = sum(
-        error.issue in {"corrupt_json", "malformed_jsonl", "empty_artifact"}
-        for error in errors
-    )
+    corrupt_count = sum(error.issue in {"corrupt_json", "malformed_jsonl"} for error in errors)
     summary = {
         "workflow": "crystalformer_bulk_collection",
         "local_only": True,
