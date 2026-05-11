@@ -193,10 +193,17 @@ Resolved allocations are recorded in `bulk_summary.json` and
 
 Use the same unified planner with `--kind gpu` before launching optional local
 MLIP or other GPU work. The planner is read-only by default: it inspects SLURM
-node state, ranks nodes by remaining GPU capacity, GPU model weight, idle CPU
-cores, and free memory, then prints an `sbatch` command. It submits only when
-`--run-sbatch` is passed explicitly. The older `scripts/slurm/plan_gpu_job.py`
-entrypoint remains as a GPU-only compatibility wrapper.
+node state, filters out nodes that do not meet the requested CUDA/GPU/CPU/memory
+minimums, then ranks eligible nodes by available TF32 GPU compute capacity:
+
+```text
+score = free_gpus * tf32_gpu_weight
+```
+
+CPU cores and memory are used for eligibility checks and request sizing, not as
+default ranking signals. It submits only when `--run-sbatch` is passed
+explicitly. The older `scripts/slurm/plan_gpu_job.py` entrypoint remains as a
+GPU-only compatibility wrapper.
 
 For CUDA PyTorch jobs, the default `--accelerator cuda` ignores AMD and Intel
 GPU partitions so a CUDA environment is not accidentally placed on the wrong
@@ -225,7 +232,7 @@ Useful options:
 - `--layout one-task-per-gpu`: one task per free GPU, with CPU cores divided
   across tasks.
 - `--min-gpus`, `--min-cpus`, `--min-memory-mb`: minimum remaining resources.
-- `--gpu-weight h200=260`: tune the per-GPU ranking weight.
+- `--gpu-weight h200=650`: override the default TF32 per-GPU ranking weight.
 - `--print-json`: print the full deterministic plan.
 - `--run-sbatch`: submit the planned command; off by default.
 

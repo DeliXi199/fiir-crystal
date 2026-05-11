@@ -65,9 +65,10 @@ It does not import MLIP packages and does not run calculations. If
 Before launching real local MLIP calculations on SLURM, use the GPU planner to
 select a node with available resources. The planner is read-only unless
 `--run-sbatch` is explicitly supplied. It checks SLURM node state, filters to
-CUDA-compatible GPU partitions by default, ranks nodes by remaining GPU count,
-GPU model weight, idle CPU cores, and free memory, then emits an `sbatch`
-command that requests all currently free GPUs and CPUs on the selected node.
+CUDA-compatible GPU partitions by default, ranks eligible nodes by
+`free_gpus * tf32_gpu_weight`, then emits an `sbatch` command that requests all
+currently free GPUs and CPUs on the selected node. CPU and memory settings are
+eligibility filters and request sizing inputs, not default ranking signals.
 
 ```bash
 python scripts/slurm/plan_slurm_job.py \

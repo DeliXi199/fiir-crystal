@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 
 from fiir_crystal.slurm_gpu_policy import (
+    DEFAULT_GPU_WEIGHTS,
     GpuSchedulingConfig,
     build_sbatch_plan,
     parse_scontrol_nodes,
     plan_gpu_job,
+    score_node,
     select_best_gpu_node,
 )
 from scripts.slurm.plan_gpu_job import main as plan_gpu_main
@@ -70,17 +72,52 @@ def test_parse_scontrol_nodes_tracks_free_gpu_cpu_resources() -> None:
     assert by_name["gpuh2002"].idle_cpus == 128
 
 
-def test_cuda_policy_ignores_amd_and_selects_strongest_remaining_capacity() -> None:
+def test_cuda_policy_ignores_amd_and_selects_highest_tf32_gpu_compute() -> None:
     nodes = parse_scontrol_nodes(SCONTROL_SAMPLE)
     selection = select_best_gpu_node(nodes, GpuSchedulingConfig(accelerator="cuda"))
 
     assert selection is not None
     assert selection.node.name == "gpuh2002"
     assert selection.partition == "h200"
+    assert selection.reason == "highest_tf32_gpu_compute_capacity"
     candidate_names = [item["node"]["name"] for item in selection.candidates]
     assert "gpu005" not in candidate_names
     assert "gpuh202" not in candidate_names
     assert candidate_names[:2] == ["gpuh2002", "gpu40902"]
+
+
+def test_gpu_score_uses_only_available_gpu_count_times_tf32_weight() -> None:
+    node = parse_scontrol_nodes(SCONTROL_SAMPLE)[0]
+    assert score_node(node, GpuSchedulingConfig()) == (
+        node.free_gpus * DEFAULT_GPU_WEIGHTS[node.gpu_model_key] * 1_000_000
+    )
+
+
+def test_cpu_and_memory_do_not_change_default_gpu_ranking() -> None:
+    text = """
+NodeName=gpu001 Arch=x86_64 CoresPerSocket=4
+   CPUAlloc=0 CPUEfctv=8 CPUTot=8 CPULoad=0.01
+   Gres=gpu:rtx4090:4
+   State=IDLE ThreadsPerCore=1
+   Partitions=gpu4090_8
+   RealMemory=8000 AllocMem=0 FreeMem=4000
+   CfgTRES=cpu=8,mem=8000M,billing=8,gres/gpu=4
+   AllocTRES=
+
+NodeName=gpu999 Arch=x86_64 CoresPerSocket=64
+   CPUAlloc=0 CPUEfctv=128 CPUTot=128 CPULoad=0.01
+   Gres=gpu:rtx4090:4
+   State=IDLE ThreadsPerCore=1
+   Partitions=gpu4090_8
+   RealMemory=1000000 AllocMem=0 FreeMem=900000
+   CfgTRES=cpu=128,mem=1000000M,billing=128,gres/gpu=4
+   AllocTRES=
+"""
+    selection = select_best_gpu_node(parse_scontrol_nodes(text), GpuSchedulingConfig())
+
+    assert selection is not None
+    assert selection.node.name == "gpu001"
+    assert selection.score == 4 * DEFAULT_GPU_WEIGHTS["rtx4090"] * 1_000_000
 
 
 def test_sbatch_plan_requests_all_currently_free_resources() -> None:

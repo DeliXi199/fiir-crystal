@@ -1,9 +1,10 @@
 """SLURM GPU node selection policy.
 
 The policy is intentionally standard-library only. It inspects local SLURM
-state, ranks nodes by remaining GPU/CPU/memory capacity, and returns a
-deterministic sbatch plan without submitting work unless a caller explicitly
-does so.
+state, ranks nodes by currently available GPU TF32 compute capacity, and
+returns a deterministic sbatch plan without submitting work unless a caller
+explicitly does so. CPU and memory constraints are used as eligibility filters
+and request sizing, not as default ranking signals.
 """
 
 from __future__ import annotations
@@ -16,16 +17,21 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 
-DEFAULT_GPU_WEIGHTS: dict[str, int] = {
-    "h200": 240,
-    "h800": 220,
-    "h20": 180,
-    "rtx4090": 120,
-    "amd80g": 90,
+TF32_GPU_WEIGHTS: dict[str, int] = {
+    # Relative dense TF32 throughput, normalized around RTX 4090 = 100.
+    # These weights are used only for scheduling priority, not scientific
+    # scoring. CPU and memory remain eligibility filters and request sizing.
+    "h200": 599,
+    "h800": 458,
+    "rtx4090": 100,
+    "h20": 90,
     "generic": 80,
-    "amd40g": 70,
-    "intel80g": 60,
+    "amd80g": 70,
+    "amd40g": 50,
+    "intel80g": 40,
 }
+
+DEFAULT_GPU_WEIGHTS: dict[str, int] = dict(TF32_GPU_WEIGHTS)
 
 CUDA_PARTITION_HINTS = ("h200", "h20", "h800", "gpu4090", "test")
 NON_CUDA_PARTITION_HINTS = ("amd", "intel")
@@ -286,7 +292,6 @@ def select_best_gpu_node(
         key=lambda item: (
             -item[0],
             -item[1].free_gpus,
-            -item[1].idle_cpus,
             item[2],
             item[1].name,
         )
@@ -304,7 +309,7 @@ def select_best_gpu_node(
         node=node,
         partition=partition,
         score=score,
-        reason="highest_weighted_remaining_gpu_cpu_memory_capacity",
+        reason="highest_tf32_gpu_compute_capacity",
         candidates=candidates,
     )
 
@@ -339,13 +344,7 @@ def node_is_cuda_compatible(node: GpuNode) -> bool:
 
 def score_node(node: GpuNode, config: GpuSchedulingConfig) -> float:
     gpu_weight = config.gpu_weights.get(node.gpu_model_key, config.gpu_weights.get("generic", 80))
-    full_idle_bonus = 500_000 if node.is_fully_idle else 0
-    return (
-        node.free_gpus * gpu_weight * 1_000_000
-        + node.idle_cpus * 2_000
-        + node.free_memory_mb
-        + full_idle_bonus
-    )
+    return node.free_gpus * gpu_weight * 1_000_000
 
 
 def build_sbatch_plan(
