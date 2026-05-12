@@ -25,12 +25,19 @@ FIIR_MACE_CANDIDATES_JSONL="${FIIR_MACE_CANDIDATES_JSONL:-outputs/crystalformer_
 FIIR_MACE_AUDIT_INDEX="${FIIR_MACE_AUDIT_INDEX:-outputs/crystalformer_bulk_gpu_smoke_perovskite_3x20/smoke/crystalformer_audit/BaTiO3/audit_candidates.jsonl}"
 FIIR_MACE_LIMIT="${FIIR_MACE_LIMIT:-8}"
 FIIR_MACE_DEVICE="${FIIR_MACE_DEVICE:-cuda}"
-FIIR_MACE_DEFAULT_DTYPE="${FIIR_MACE_DEFAULT_DTYPE:-float32}"
 FIIR_MACE_WORKERS="${FIIR_MACE_WORKERS:-${FIIR_TOTAL_GPUS:-1}}"
 FIIR_MACE_STRICT="${FIIR_MACE_STRICT:-0}"
 FIIR_MACE_RELAX="${FIIR_MACE_RELAX:-0}"
 FIIR_MACE_RELAX_STEPS="${FIIR_MACE_RELAX_STEPS:-100}"
 FIIR_MACE_FMAX="${FIIR_MACE_FMAX:-0.05}"
+
+if [[ -z "${FIIR_MACE_DEFAULT_DTYPE+x}" ]]; then
+  if [[ "${FIIR_MACE_RELAX}" == "1" || "${FIIR_MACE_RELAX}" == "true" ]]; then
+    FIIR_MACE_DEFAULT_DTYPE="float64"
+  else
+    FIIR_MACE_DEFAULT_DTYPE="float32"
+  fi
+fi
 
 echo "FIIR MACE offline validation"
 echo "  node=${SLURM_NODELIST:-local}"

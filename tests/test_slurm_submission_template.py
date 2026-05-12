@@ -85,6 +85,16 @@ def test_crystalformer_gpu_submitter_uses_unified_gpu_policy() -> None:
     assert "monitor_slurm_startup.sh --job-id" in text
 
 
+def test_mace_slurm_template_uses_float64_by_default_for_relaxation() -> None:
+    text = Path("scripts/slurm/run_mace_offline_validation.slurm").read_text(encoding="utf-8")
+
+    assert 'FIIR_MACE_RELAX="${FIIR_MACE_RELAX:-0}"' in text
+    assert 'if [[ -z "${FIIR_MACE_DEFAULT_DTYPE+x}" ]]; then' in text
+    assert 'FIIR_MACE_DEFAULT_DTYPE="float64"' in text
+    assert 'FIIR_MACE_DEFAULT_DTYPE="float32"' in text
+    assert '--default-dtype "${FIIR_MACE_DEFAULT_DTYPE}"' in text
+
+
 def test_unified_slurm_planner_cli_exists() -> None:
     script = Path("scripts/slurm/plan_slurm_job.py")
     text = script.read_text(encoding="utf-8")
