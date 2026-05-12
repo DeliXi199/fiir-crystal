@@ -549,6 +549,35 @@ For real training later, use a prepared CrystalFormer fork/submodule and an
 explicit external command. FIIR records stdout, stderr, return code, cwd, and
 command provenance, but it does not import JAX/torch or provide a DPO loss.
 
+To prepare a non-overwriting DPO smoke package from the current stability-aware
+pairs, write chosen/rejected raw-sequence JSONL files plus a command manifest:
+
+```bash
+python scripts/prepare_crystalformer_dpo_smoke_run.py \
+  --preference-pairs-jsonl outputs/dpo_preferences/mace_relax_20260512_rebuild_current_filtered/dpo_preferences_all_formula/preference_pairs.jsonl \
+  --output-dir outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare \
+  --base-checkpoint-dir external/checkpoints/crystalformer/alex20s_csp \
+  --crystalformer-work-dir external/CrystalFormer \
+  --epochs 1 \
+  --batchsize 32 \
+  --num-io-process 1
+```
+
+This preparation step does not train. It uses the base checkpoint only as the
+future `--restore_path` and writes the after-checkpoint root under the output
+directory. `--epochs` is interpreted as additional epochs from the latest
+checkpoint in `--base-checkpoint-dir`, so the generated command targets the
+next absolute CrystalFormer epoch without writing back into the base
+checkpoint directory.
+
+Run the generated `run_training.sh` only from an allocated compute node with
+the CrystalFormer environment active. The reusable SLURM wrapper is:
+
+```bash
+FIIR_DPO_RUN_SCRIPT=outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/run_training.sh \
+sbatch scripts/slurm/run_crystalformer_dpo_smoke.slurm
+```
+
 ## Output Files
 
 The configured runner writes:
@@ -589,6 +618,8 @@ plus `feedback_buffer.jsonl`, `active_loop_state.json`,
   CrystalFormer smoke audits.
 - `fiir_crystal.dpo.training_boundary`: external CrystalFormer DPO trainer
   manifest and readiness checks.
+- `fiir_crystal.dpo.smoke_run`: non-overwriting CrystalFormer DPO smoke-run
+  package preparation.
 - `fiir_crystal.comparison`: pair mode comparison and run aggregation.
 - `fiir_crystal.feedback`: feedback buffer and mock active loop simulation.
 

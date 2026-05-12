@@ -78,3 +78,24 @@ If all eligible candidates have equal FIIR scores or no comparable margin, the
 builder emits zero pairs and records `no_comparable_margin` in the summary
 rather than fabricating preferences. DPO training is explicitly out of scope
 for this stage.
+
+The smoke-run preparer can additionally materialize a non-overwriting external
+training handoff:
+
+- `chosen_sequences.jsonl`
+- `rejected_sequences.jsonl`
+- `pair_index.jsonl`
+- `dpo_smoke_manifest.json`
+- `run_training.sh`
+
+Each sequence JSONL row contains parsed native CrystalFormer `g`, `L`, `X`,
+`A`, and `W` arrays. The recommended command must use the base checkpoint only
+as `--restore_path` and must write any after checkpoint under a separate
+`--folder` output root. The smoke-run preparer records both the restored epoch
+and target epoch; its `--epochs` option is additional epochs from the latest
+base checkpoint, not permission to overwrite that checkpoint.
+
+If the generated command is executed, it must happen in the external
+CrystalFormer environment on an allocated compute node, for example through
+`scripts/slurm/run_crystalformer_dpo_smoke.slurm`. FIIR still does not execute
+DPO training as part of the core package.

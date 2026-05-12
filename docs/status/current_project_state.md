@@ -13,9 +13,10 @@ decisions.
   active-loop simulation, and CrystalFormer DPO handoff boundary.
 - The repository should not run real DPO training, DFT, MLIP execution, or
   external model installation inside the core `fiir_crystal` package.
-- Current best next step: implement/use the external CrystalFormer-side DPO
-  training adapter or fork/submodule, using the 284 stability-aware preference
-  pairs listed below.
+- Current best next step: do not run more DPO on the 284-pair smoke set. Use
+  the completed before/after generation sanity artifacts to select candidates
+  for the same offline validation or expand the preference dataset before any
+  larger DPO run.
 
 ## Important Guidance State
 
@@ -111,6 +112,108 @@ Summary:
 - warning: CrystalFormer is a normal clone; fork/submodule is recommended for
   future training work.
 
+### Completed Non-Overwriting DPO Smoke Run
+
+The current DPO smoke package is:
+
+```text
+outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/dpo_smoke_manifest.json
+```
+
+Summary:
+
+- FIIR core still does not implement DPO training; the prepared external
+  CrystalFormer smoke was run through SLURM on a GPU compute node.
+- prepared pairs: 284
+- chosen/rejected raw-sequence JSONL rows: 284 / 284
+- before checkpoint: `external/checkpoints/crystalformer/alex20s_csp`
+- checkpoint start epoch: 46000
+- checkpoint target epoch: 46001
+- after checkpoint output root:
+  `outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/after_checkpoint/`
+- produced after checkpoint:
+  `outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/after_checkpoint/beta_0.1_label_0_gamma_0_adam_bs_32_lr_1e-05_decay_0_clip_1_A_119_W_28_N_21_Nf_5_Kx_16_Kl_4_h0_256_l_16_H_8_k_32_m_256_e_256_drop_0.1/epoch_046001.pkl`
+- after checkpoint size: 159M
+- after checkpoint sha256:
+  `42b11edfbf1586a1a8910e087616a5803486eba53b3901657c170c1b30c33fa6`
+- run script:
+  `outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/run_training.sh`
+- non-overwrite guard: the after output root is separate from the before
+  checkpoint directory.
+- SLURM job: `98336`, `fiir-cf-dpo-smoke`, `COMPLETED`, exit code `0:0`,
+  elapsed `00:03:05`, node `gpu40902`.
+- SLURM logs:
+  - `logs/slurm/fiir-cf-dpo-smoke_98336.log`
+  - `logs/slurm/fiir-cf-dpo-smoke_98336.err`
+- smoke training row in `data.txt`:
+  - epoch: 46001
+  - loss / dpo_loss: 1253.308228 / 1253.308228
+  - val loss / val dpo_loss: 3654.330566 / 3654.330566
+- stderr contained XLA autotuning warnings only; no traceback was present in
+  the successful job.
+
+CrystalFormer local branch/state:
+
+- `external/CrystalFormer` is on local branch `fiir-dpo-adapter-smoke`.
+- Local CrystalFormer edits:
+  - `crystalformer/reinforce/dpo.py`: convert the top-level DPO deprecation
+    hard raise into a warning so `train_dpo` can import; adapt DPO log-prob
+    calls to the current CrystalFormer composition argument; include `logp_g`;
+    and shuffle six-field data tuples safely.
+  - `crystalformer/src/utils.py`: allow `GLXYZAW_from_file(... .jsonl)` to
+    load FIIR raw `g/L/X/A/W` sequence JSONL directly.
+- Because `external/CrystalFormer` is a normal external clone, the local
+  CrystalFormer adapter changes are also exported in the main repository at:
+  `patches/crystalformer/fiir-dpo-adapter-smoke.patch`.
+
+### DPO Smoke Before/After Generation Sanity
+
+Matched before/after generation was run with identical formulas and sampling
+settings:
+
+- scope: 10 formulas x 20 samples for before and after
+- seed: 20260512
+- sampling: `K=40`, `top_p=1.0`, `temperature=1.0`
+- before config:
+  `configs/generated/dpo_smoke_before_after/before_10x20_seed20260512.json`
+- after config:
+  `configs/generated/dpo_smoke_before_after/after_10x20_seed20260512.json`
+- before output:
+  `outputs/dpo_smoke_before_after/before_10x20_seed20260512/`
+- after output:
+  `outputs/dpo_smoke_before_after/after_10x20_seed20260512/`
+- comparison report:
+  `outputs/dpo_smoke_before_after/comparison/report.md`
+- comparison summary:
+  `outputs/dpo_smoke_before_after/comparison/summary.json`
+
+SLURM state:
+
+- before job `98383`: `COMPLETED`, exit `0:0`, node `gpu40902`
+- old after job `98385`: cancelled while pending so it could be resubmitted
+  onto the freed node
+- after retry job `98407`: `COMPLETED`, exit `0:0`, node `gpu40902`
+
+Result:
+
+- before candidates / DPO eligible: 200 / 200
+- after candidates / DPO eligible: 200 / 200
+- before F1 fails: 3
+- after F1 fails: 2
+- F2 fails: 0 before and after
+- F3 unknown: 200 before and 200 after
+- geometry/chemistry preference pairs from smoke audit: 57 before, 38 after
+- single-root artifact QA passed for both runs:
+  - before: `outputs/dpo_smoke_before_after/qa_before/qa_summary.json`
+  - after: `outputs/dpo_smoke_before_after/qa_after/qa_summary.json`
+
+Interpretation:
+
+- This is only a generation/audit sanity check for the DPO smoke checkpoint.
+- It shows no obvious generation breakage after the one-epoch DPO smoke.
+- It is not evidence of DPO performance improvement because there is no offline
+  validation import for these generated candidates and F3 remains unknown.
+
 ## Reproduction Commands
 
 Rebuild the current all-formula F3-aware DPO preference artifact:
@@ -129,6 +232,34 @@ python scripts/prepare_crystalformer_dpo_training_boundary.py \
   --output-dir outputs/crystalformer_dpo_training_boundary/mace_relax_20260512_rebuild_current_filtered \
   --crystalformer-work-dir external/CrystalFormer \
   --checkpoint-dir external/checkpoints/crystalformer/alex20s_csp
+```
+
+Prepare the current non-overwriting DPO smoke run package:
+
+```bash
+python scripts/prepare_crystalformer_dpo_smoke_run.py \
+  --preference-pairs-jsonl outputs/dpo_preferences/mace_relax_20260512_rebuild_current_filtered/dpo_preferences_all_formula/preference_pairs.jsonl \
+  --output-dir outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare \
+  --base-checkpoint-dir external/checkpoints/crystalformer/alex20s_csp \
+  --crystalformer-work-dir external/CrystalFormer \
+  --epochs 1 \
+  --batchsize 32 \
+  --num-io-process 1
+```
+
+Run the prepared smoke only on an allocated compute node with the CrystalFormer
+environment active. The reusable SLURM wrapper is:
+
+```bash
+FIIR_DPO_RUN_SCRIPT=outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/run_training.sh \
+sbatch scripts/slurm/run_crystalformer_dpo_smoke.slurm
+```
+
+The generated run script can also be run directly inside an interactive GPU
+allocation:
+
+```bash
+outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/run_training.sh
 ```
 
 Verify code health:
@@ -150,6 +281,7 @@ pytest -q
 
 ## Recommended Next Step
 
-Implement or use a CrystalFormer-side DPO training adapter in a recorded fork or
-submodule. Use the 284 stability-aware pairs above as the initial external
-training handoff. Keep training outside FIIR core and preserve provenance.
+Use the before/after generated candidates as a small sanity set for the same
+offline validation workflow, or expand the preference data before running any
+larger DPO. The current DPO smoke checkpoint should be treated as a pipeline
+artifact, not a performance-improved model.

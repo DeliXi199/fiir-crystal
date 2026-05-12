@@ -1,0 +1,200 @@
+diff --git a/crystalformer/reinforce/dpo.py b/crystalformer/reinforce/dpo.py
+index 4f85592..3383e63 100644
+--- a/crystalformer/reinforce/dpo.py
++++ b/crystalformer/reinforce/dpo.py
+@@ -2,7 +2,9 @@ deprecation = """
+ Direct preference optimization (DPO) module is deprecated and will be removed in future versions.
+ Please use the PPO module for reinforcement learning tasks.
+ """
+-raise DeprecationWarning(deprecation)
++import warnings
++
++warnings.warn(deprecation, DeprecationWarning, stacklevel=2)
+ 
+ 
+ import jax
+@@ -11,7 +13,8 @@ import optax
+ import os
+ import math
+ 
+-from crystalformer.src.utils import shuffle
++from crystalformer.src.formula import find_composition_vector
++from crystalformer.src.wyckoff import mult_table
+ import crystalformer.src.checkpoint as checkpoint
+ 
+ 
+@@ -37,12 +40,12 @@ def make_dpo_loss(logp_fn, beta, label_smoothing=0.0, gamma=0.0, ipo=False):
+     
+     def loss_fn(params, key, x_w, x_l, ref_chosen_logps, ref_rejected_logps):
+         key, subkey = jax.random.split(key)
+-        logp_w, logp_xyz, logp_a, logp_l = logp_fn(params, subkey, *x_w, False)
+-        policy_chosen_logps = logp_w + logp_xyz + logp_a + logp_l
++        logp_g, logp_w, logp_xyz, logp_a, logp_l = logp_fn(params, subkey, *x_w, False)
++        policy_chosen_logps = logp_g + logp_w + logp_xyz + logp_a + logp_l
+ 
+         key, subkey = jax.random.split(key)
+-        logp_w, logp_xyz, logp_a, logp_l = logp_fn(params, subkey, *x_l, False)
+-        policy_rejected_logps = logp_w + logp_xyz + logp_a + logp_l
++        logp_g, logp_w, logp_xyz, logp_a, logp_l = logp_fn(params, subkey, *x_l, False)
++        policy_rejected_logps = logp_g + logp_w + logp_xyz + logp_a + logp_l
+ 
+         dpo_loss = dpo_logp_fn(policy_chosen_logps,
+                                policy_rejected_logps,
+@@ -56,6 +59,8 @@ def make_dpo_loss(logp_fn, beta, label_smoothing=0.0, gamma=0.0, ipo=False):
+ 
+ 
+ def train(key, optimizer, opt_state, dpo_loss_fn, logp_fn, params, epoch_finished, epochs, batchsize, chosen_data, rejected_data, path, val_ratio=0.2):
++    chosen_data = _with_composition(chosen_data)
++    rejected_data = _with_composition(rejected_data)
+ 
+     @jax.jit
+     def step(params, key, opt_state, x_w, x_l, ref_chosen_logps, ref_rejected_logps):
+@@ -69,11 +74,11 @@ def train(key, optimizer, opt_state, dpo_loss_fn, logp_fn, params, epoch_finishe
+     if os.path.getsize(log_filename) == 0:
+         f.write("epoch loss dpo_loss chosen_logp rejected_logp v_loss v_dpo_loss v_chosen_logp v_rejected_logp\n")
+     ref_params = params
+-    logp_fn = jax.jit(logp_fn, static_argnums=7)
++    logp_fn = jax.jit(logp_fn, static_argnums=8)
+ 
+     ref_chosen_logps = jnp.array([])
+     ref_rejected_logps = jnp.array([])
+-    _, chosen_L, _, _, _ = chosen_data
++    _, _, chosen_L, _, _, _ = chosen_data
+     num_samples = len(chosen_L)
+     num_batches = math.ceil(num_samples / batchsize)
+     for batch_idx in range(num_batches):
+@@ -82,13 +87,13 @@ def train(key, optimizer, opt_state, dpo_loss_fn, logp_fn, params, epoch_finishe
+         key, subkey1, subkey2 = jax.random.split(key, 3)
+ 
+         data = jax.tree_util.tree_map(lambda x: x[start_idx:end_idx], chosen_data)
+-        logp_w, logp_xyz, logp_a, logp_l = logp_fn(ref_params, subkey1, *data, False)
+-        logp = logp_w + logp_xyz + logp_a + logp_l
++        logp_g, logp_w, logp_xyz, logp_a, logp_l = logp_fn(ref_params, subkey1, *data, False)
++        logp = logp_g + logp_w + logp_xyz + logp_a + logp_l
+         ref_chosen_logps = jnp.append(ref_chosen_logps, logp, axis=0)
+ 
+         data = jax.tree_util.tree_map(lambda x: x[start_idx:end_idx], rejected_data)
+-        logp_w, logp_xyz, logp_a, logp_l = logp_fn(ref_params, subkey2, *data, False)
+-        logp = logp_w + logp_xyz + logp_a + logp_l
++        logp_g, logp_w, logp_xyz, logp_a, logp_l = logp_fn(ref_params, subkey2, *data, False)
++        logp = logp_g + logp_w + logp_xyz + logp_a + logp_l
+         ref_rejected_logps = jnp.append(ref_rejected_logps, logp, axis=0)
+ 
+     print(ref_chosen_logps.shape, ref_rejected_logps.shape)
+@@ -121,10 +126,9 @@ def train(key, optimizer, opt_state, dpo_loss_fn, logp_fn, params, epoch_finishe
+     
+     for epoch in range(epoch_finished+1, epochs+1):
+         key, subkey = jax.random.split(key)
+-        train_chosen_data = shuffle(subkey, train_chosen_data)
+-        train_rejected_data = shuffle(subkey, train_rejected_data)  
+-
+         idx = jax.random.permutation(subkey, jnp.arange(len(train_ref_chosen_logps)))
++        train_chosen_data = jax.tree_util.tree_map(lambda x: x[idx], train_chosen_data)
++        train_rejected_data = jax.tree_util.tree_map(lambda x: x[idx], train_rejected_data)
+         train_ref_chosen_logps = train_ref_chosen_logps[idx]
+         train_ref_rejected_logps = train_ref_rejected_logps[idx]
+ 
+@@ -132,7 +136,7 @@ def train(key, optimizer, opt_state, dpo_loss_fn, logp_fn, params, epoch_finishe
+         train_dpo_loss = 0.0
+         train_policy_chosen_logps = 0.0
+         train_policy_rejected_logps = 0.0
+-        _, chosen_L, _, _, _ = train_chosen_data
++        _, _, chosen_L, _, _, _ = train_chosen_data
+         num_samples = chosen_L.shape[0]
+         num_batches = math.ceil(num_samples / batchsize)
+         for batch_idx in range(num_batches):
+@@ -197,3 +201,12 @@ def train(key, optimizer, opt_state, dpo_loss_fn, logp_fn, params, epoch_finishe
+     f.close()
+ 
+     return params, opt_state
++
++
++def _with_composition(data):
++    if len(data) == 6:
++        return data
++    G, L, XYZ, A, W = data
++    M = jax.vmap(lambda g, w: mult_table[g - 1, w], in_axes=(0, 0))(G, W)
++    composition = jax.vmap(find_composition_vector, (0, 0), 0)(A, M)
++    return composition, G, L, XYZ, A, W
+diff --git a/crystalformer/src/utils.py b/crystalformer/src/utils.py
+index f5bb2f7..a0d2a61 100644
+--- a/crystalformer/src/utils.py
++++ b/crystalformer/src/utils.py
+@@ -1,5 +1,7 @@
+ import jax
+ import jax.numpy as jnp
++import ast
++import json
+ import numpy as np
+ import pandas as pd
+ from pyxtal import pyxtal
+@@ -144,6 +146,9 @@ def GLXYZAW_from_file(csv_file, atom_types, wyck_types, n_max, num_workers=1):
+       A: atom types
+       W: wyckoff letters
+     """
++    if csv_file.endswith('.jsonl'):
++        return GLXYZAW_from_raw_sequence_jsonl(csv_file, n_max)
++
+     if csv_file.endswith('.lmdb'):
+         import lmdb
+         import pickle
+@@ -189,6 +194,54 @@ def GLXYZAW_from_file(csv_file, atom_types, wyck_types, n_max, num_workers=1):
+     
+     return G, L, XYZ, A, W
+ 
++def GLXYZAW_from_raw_sequence_jsonl(jsonl_file, n_max):
++    """
++    Read FIIR raw-sequence JSONL rows containing g, L, X, A, W fields.
++
++    This bypasses CIF parsing and keeps FIIR DPO smoke data aligned with the
++    native CrystalFormer token arrays emitted by generation.
++    """
++    rows = []
++    with open(jsonl_file, "r", encoding="utf-8") as handle:
++        for line in handle:
++            stripped = line.strip()
++            if stripped:
++                rows.append(json.loads(stripped))
++    G, L, XYZ, A, W = [], [], [], [], []
++    for row in rows:
++        sequence = row.get("sequence", row)
++        G.append(int(_parse_raw_sequence_value(sequence["g"])))
++        L.append([float(value) for value in _parse_raw_sequence_value(sequence["L"])])
++        XYZ.append(_parse_xyz_sequence(sequence.get("X", sequence.get("XYZ"))))
++        A.append([int(value) for value in _parse_raw_sequence_value(sequence["A"])])
++        W.append([int(value) for value in _parse_raw_sequence_value(sequence["W"])])
++
++    G = jnp.array(G)
++    A = jnp.array(A).reshape(-1, n_max)
++    W = jnp.array(W).reshape(-1, n_max)
++    XYZ = jnp.array(XYZ).reshape(-1, n_max, 3)
++    L = jnp.array(L).reshape(-1, 6)
++
++    A, XYZ = sort_atoms(W, A, XYZ)
++
++    return G, L, XYZ, A, W
++
++def _parse_raw_sequence_value(value):
++    if isinstance(value, str):
++        value = value.strip()
++        try:
++            return json.loads(value)
++        except json.JSONDecodeError:
++            try:
++                return ast.literal_eval(value)
++            except (SyntaxError, ValueError):
++                return value
++    return value
++
++def _parse_xyz_sequence(value):
++    parsed = _parse_raw_sequence_value(value)
++    return [[float(item) for item in row] for row in parsed]
++
+ def GLXA_to_structure_single(G, L, X, A):
+     """
+     Convert G, L, X, A to pymatgen structure. Do not use this function due to the bug in pymatgen.
+@@ -270,4 +323,3 @@ if __name__=='__main__':
+         print (formula)
+         print (composition[i])
+ 
+-
