@@ -1,712 +1,208 @@
-## GitHub/Codex 导出信息
-
-- Repository name: `fiir-crystal`
-- Repository role: Paper 3 指导文档
-- Export path: `docs/guidance/04_paper3_discovery_pipeline.md`
-- Document type: implementation guidance
-- Main code module: `fiir_crystal.discovery`
-- Related modules:
-  - `fiir_crystal.failure`
-  - `fiir_crystal.predictor`
-  - `fiir_crystal.generation`
-  - `fiir_crystal.evaluation`
-- Main spec file to generate:
-  - `docs/specs/discovery_pipeline.md`
-
----
-
-## 工程实现边界
-
-本页面用于指导 failure-informed discovery pipeline 实现。代码实现应拆成以下组件：
-
-1. `fiir_crystal.discovery.pipeline`
-   - 定义 discovery pipeline 主流程。
-   - 支持 generate → screen → validate → rank → export → feedback 的闭环。
-2. `fiir_crystal.discovery.screening`
-   - 实现 Failure Predictor screening、MLIP screening、synthesizability screening 的接口。
-   - 第一阶段不强制接入真实外部模型，只定义可替换接口。
-3. `fiir_crystal.discovery.ranking`
-   - 实现 Pareto ranking / multi-objective ranking。
-   - 不建议只用 `f1 + f2 + f3` 或单一 `E_hull` 排序。
-4. `fiir_crystal.discovery.validation`
-   - 定义 MLIP validation、DFT validation、database novelty check 的接口。
-   - 第一阶段只生成任务描述和占位结果，不运行真实 DFT。
-5. `fiir_crystal.discovery.feedback`
-   - 将 MLIP/DFT 失败结果回写到 failure buffer。
-   - 支持后续更新 Failure Predictor 或 FSAL preference dataset。
-
----
-
-## 实施目标
-
 <aside>
 🎯
 
-构建**失败归因驱动的 Active Discovery Pipeline**——将 FSAL-v2 模型、Failure Predictor（升级为 critic + acquisition function）、3D Pareto ranking、可合成性评估与多保真 DFT 验证结合，**端到端发现 DFT 验证通过的全新可合成晶体**。FIIR-v2 核心升级：从静态筛选 pipeline 升级为 **Active Discovery Loop**，Failure Predictor 不再只做被动 reranking，而是主动决定"下一步探索哪里"。
+**Paper 3 科学使命（v2.2 收敛版）**：验证失败感知生成模型在真实材料发现场景中的实用价值——在固定计算预算下，FIIR pipeline（含 constrained qEHVI 多目标选择 + conformal prediction UQ + 可合成性筛选）能否比现有方法发现更多经 DFT 验证的新材料？
 
 </aside>
-
-**目标 Venue**：npj Computational Materials / Nature Communications
-
-**预估工期**：4–6 个月
-
-**前置依赖**：Paper 1 的 Failure Predictor + Paper 2 的 FSAL 模型
-
----
-
-## Step 1：确定目标应用场景
-
-**推荐目标：宽带隙半导体**（band gap > 3.0 eV + 稳定 + 可合成）
-
-**推荐化学空间**（按优先级排序）：
-
-| 化学空间         | 元素体系                           | 典型目标            | 优势                               |
-| ---------------- | ---------------------------------- | ------------------- | ---------------------------------- |
-| **氧化物钙钛矿** | ABO₃（A=Ca/Sr/Ba, B=Ti/Zr/Sn/Hf）  | 高介电 / 铁电       | 结构规则、DFT 成本低、参考数据丰富 |
-| **III-V 氮化物** | Al-Ga-In-N 及合金                  | UV LED / 功率器件   | 工业需求明确、PBE band gap 可校准  |
-| **多元氧化物**   | Li/Na-TM-O（TM=过渡金属）三元/四元 | 固态电解质 / 宽带隙 | 与 MatterGen 差异化最大            |
-
-**选择理由**：
-
-- DFT band gap 计算成本相对低（PBE 弛豫 + HSE06 单点即可）
-- 与 MatterGen (Zeni et al., _Nature_ 2025) [2]（磁性/力学）不重叠，差异化明显
-- 功率电子学领域有明确工业需求
-- 可用 MACE/CHGNet 快速预筛，再用 DFT 精确验证
-- 选定一个具体子空间（如 ABO₃ 钙钛矿）可大幅缩小凸包计算范围，降低 DFT 成本
-
----
-
-## Step 2：构建多保真分层筛选 Pipeline
-
-### FIIR-v2 Active Discovery Loop 架构
 
 <aside>
-🔴
+🚦
 
-**FIIR-v2 核心升级**：从线性筛选 pipeline 升级为 **Active Discovery Loop**。关键变化：① Failure Predictor 升级为 **acquisition function**（不只判断好坏，还决定探索价值）；② 硬阈值筛选替换为 **3D Pareto ranking**（stability × novelty × diversity）；③ 增加 **near-miss repair** 模块（F3 near-miss 局部修复）；④ 多保真 budget 分配（不是所有候选都用同一精度验证）。
+**v2.2 执行约束**：
+**① Paper 3 必须在 Paper 1/2 方法稳定后启动**，不与 Paper 1/2 同时推进为同等优先级。Paper 3 的需求不应反向增加 Paper 1/2 的负担。
+**② 必须绑定具体材料场景**：不泛泛说"新材料发现"。推荐候选场景：固态电解质 / 锂电正极 / 热电材料 / 钙钛矿氧化物。选择标准：社区关注度高 + 有明确实验可验证性 + 有合理 baseline + Alexandria [13] 覆盖广。
+**③ Repair/refiner 升级为 discovery pipeline 的第二阶段**：FSAL 改善生成分布 → Repair 修 near-miss → Validation ladder 筛最终候选。注意 repair 后结构必须用 DFT 做最终验证，避免 MLIP 弛豫的 circular validation。
 
 </aside>
+
+---
+
+## 一、核心科学主张
+
+### Discovery ≠ Reranking
+
+Paper 3 要回答的不是"FSAL 能否生成更多稳定结构"（Paper 2 已回答），而是：
+
+**失败感知生成模型 + Failure Predictor 能否构成一个有效的 active discovery pipeline，在真实材料发现中展现实用价值？**
+
+具体而言：
+
+1. Failure Predictor + constrained qEHVI 作为 acquisition function 是否比传统 energy-based screening 更有效？
+2. 在固定计算预算（有限 DFT 计算次数）下，FIIR pipeline 是否命中更多新材料？
+3. 发现的材料是否具有真正的 novelty（不在训练集/已知数据库中）且具备可合成性？
+4. Conformal prediction UQ 是否比 ensemble disagreement 提供更可靠的不确定性估计？
+
+---
+
+## 二、方法论架构
+
+### 从评估到发现：Failure Predictor 的角色转变
+
+在 Paper 1 中，Failure Predictor 是一个评估器（evaluator）；在 Paper 3 中，它升级为 discovery 的核心组件：
+
+| 角色         | Paper 1 中                                    | Paper 3 中                                     |
+| ------------ | --------------------------------------------- | ---------------------------------------------- |
+| **主要功能** | 预测 failure vector，替代昂贵的 MLIP ensemble | 作为 acquisition function 指导候选选择         |
+| **输出用途** | 标注和诊断                                    | 多目标候选排序 + uncertainty-based exploration |
+| **不确定性** | 标签质量指标                                  | exploration signal——高不确定性 = 值得探索      |
+
+### 多目标候选选择原则
+
+Discovery 不是单纯选"最稳定"的候选，而是在多个目标之间做 Pareto 最优选择：
+
+**四个目标维度**：
+
+1. **预测质量**：Failure Predictor 预测的 failure score 低（预期稳定）
+2. **Novelty**：与训练集和已知数据库的距离远（真正新颖，F4 维度）
+3. **可合成性**：CLscore / CSLLM 预测可合成（F5 维度）
+4. **Exploration value**：Predictor 的不确定性高（信息增益大），使用 conformal prediction [42][44] 提供 distribution-free 覆盖率保证
+
+**选择方法：Constrained qEHVI（升级版）**：
+
+- 使用 **constrained q-Expected Hypervolume Improvement**（qEHVI）进行多目标 Pareto 最优选择
+- 约束条件：F1 几何合法性 > 阈值 + F5 可合成性 > 阈值
+- 优化目标：同时最大化稳定性、新颖性和探索价值
+- 支持 **多保真 BO**（multi-fidelity Bayesian optimization）：MLIP 为低保真、single-point DFT 为中保真、full relax DFT 为高保真
+- 代表性子集应在 failure vector 空间中分散，避免重复验证相似结构
+
+---
+
+## 三、验证阶梯（Validation Ladder）
+
+发现的候选结构需要经过多层验证，逐步提高保真度：
+
+| 阶段                                                                  | 方法角色                                                                                                                                                                                                                                                        | 淘汰标准                               | 关键升级                                                |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------- |
+| **Layer 1: 规则过滤**                                                 | 移除明显非法结构                                                                                                                                                                                                                                                | F1 几何检测不通过                      | —                                                       |
+| **Layer 2: Failure Predictor 快筛**                                   | 用 Predictor 快速估计五维 failure vector，初筛                                                                                                                                                                                                                  | 预测 failure score 过高                | 五维预测（含 F4/F5）                                    |
+| **Layer 3: MLIP Ensemble 验证 + Chemistry-Aware Confidence Discount** | 对筛选后候选进行完整 MLIP ensemble 弛豫 + self-consistent hull 评估。**v2.2 新增**：应用 chemistry-aware confidence discount——MLIP ensemble disagreement 超过阈值的化学体系，F3 稳定性判定自动降低置信度（calibration tier 降一级），防止 MLIP 系统偏差导致误判 | $E_{\text{hull}}$ 过高或 MLIP 分歧过大 | Self-consistent hull + Conformal prediction UQ [42][44] |
+| **Layer 4: Novelty + 可合成性检查**                                   | F4 泄漏检测（StructureMatcher 去重）+ F5 可合成性评估（CLscore [43] + CSLLM [17]）                                                                                                                                                                              | 已知结构或不可合成                     | CLscore 批量打分 + CSLLM 边界样本二次验证               |
+| **Layer 5: DFT 验证**                                                 | 对最终候选进行高保真 DFT 计算                                                                                                                                                                                                                                   | DFT 验证不通过                         | 结果反馈至 Failure Predictor + Calibration Tier 更新    |
+
+### 验证阶梯的方法论意义
+
+- **计算效率**：每层淘汰大量候选，使昂贵的 DFT 只用于最有希望的结构
+- **信息反馈**：DFT 结果反馈回 Failure Predictor 训练集，形成 active learning 闭环
+- **成本可控**：固定 DFT 预算下最大化发现效率
+- **Conformal prediction 保证**：Layer 3 的 MLIP 不确定性由 conformal prediction 提供 distribution-free 覆盖率保证（如 90% 的真实 E_hull 落在预测区间内），比 ensemble std 更可靠 [44]
+- **Chemistry-aware confidence discount（v2.2）**：MLIP 对过渡金属氧化物、含 f 电子体系等化学空间存在系统偏差。Layer 3 利用 ensemble disagreement 自动识别高偏差体系并降低其 F3 标签的 calibration tier，使这些体系在 Pareto 选择中被适度保守对待，而非被 MLIP 假阳性误导
+
+---
+
+## 四、Active Discovery 闭环
+
+### 闭环设计原则
 
 ```mermaid
 flowchart TD
-    A["FSAL-v2 模型\n(Paper 2)"] --> B["生成 N 个候选"]
-    B --> PF["Pre-filtering\n移除明显非法结构"]
-    PF --> C["Failure Predictor\nas Acquisition Function"]
-    C --> ACQ["Acquisition Score:\nutility = success + novelty\n+ diversity + uncertainty_bonus\n- cost"]
-    ACQ --> PR["3D Pareto Ranking\nstability × novelty × diversity\n(替代硬阈值)"]
-    PR --> KM["k-medoids 选择\n代表性结构"]
-    KM --> NM{"Near-miss?\nE_hull 0.05-0.15"}
-    NM -->|是| REP["Near-miss Repair\n局部弛豫 + Wyckoff 优化"]
-    NM -->|否| MF["Multi-Fidelity Validation\nTier决定验证精度"]
-    REP --> MF
-    MF --> DFT["DFT 精确验证\n(Top-50)"]
-    DFT --> DB["数据库比对\n(ICSD/MP/Alexandria/GNoME)"]
-    DB --> FB["Feedback → 更新\nFailure Predictor\n+ Acquisition Function"]
-    FB -->|"Active Loop"| B
+    A["FSAL 改进模型"] --> B["生成大量候选"]
+    B --> C["验证阶梯\n(Layer 1→5)"]
+    C --> D["DFT 验证结果"]
+    D --> E{"发现新材料？"}
+    E -->|是| F["新材料库"]
+    E -->|否| G["失败信息反馈"]
+    G --> H["更新 Failure Predictor\n+ 更新 FSAL pair"]
+    H --> A
+    D --> H
 ```
 
-### 各层实现
+**关键设计**：
 
-#### Layer 1：Failure Predictor as Acquisition Function（FIIR-v2 升级）
-
-```python
-import numpy as np
-from sklearn_extra.cluster import KMedoids
-
-def compute_acquisition_score(
-    struct, failure_predictor,
-    known_structures: list,
-    composition_counts: dict
-) -> dict:
-    """
-    FIIR-v2 Acquisition Function：不只判断好坏，还评估探索价值。
-    utility(x) = predicted_success(x) + novelty(x)
-                + diversity(x) + uncertainty_bonus(x) - cost(x)
-    """
-    pred = failure_predictor.predict(struct)
-
-    # (a) predicted_success: 1 - 综合失败分数
-    success_score = 1.0 - (pred["f1"] + pred["f2"] + pred["f3"]) / 3.0
-
-    # (b) novelty: 与已知结构的最小距离
-    from pymatgen.analysis.structure_matcher import StructureMatcher
-    matcher = StructureMatcher(ltol=0.3, stol=0.5, angle_tol=10)
-    min_dist = 1.0  # 默认完全新颖
-    for known in known_structures[-1000:]:  # 只看最近的
-        if matcher.fit(struct, known):
-            min_dist = 0.0
-            break
-    novelty_score = min_dist
-
-    # (c) diversity: 与已生成候选的组成多样性
-    comp_key = struct.composition.reduced_formula
-    comp_count = composition_counts.get(comp_key, 0)
-    diversity_score = 1.0 / (1.0 + comp_count)
-
-    # (d) uncertainty_bonus: Failure Predictor 不确定性
-    uncertainty = pred.get("uncertainty", 0.0)
-    uncertainty_bonus = 0.3 * uncertainty  # 鼓励探索不确定区域
-
-    # (e) cost: 验证成本估计（原子数越多 DFT 越贵）
-    cost_score = 0.1 * len(struct) / 100.0
-
-    utility = (
-        0.4 * success_score +
-        0.2 * novelty_score +
-        0.15 * diversity_score +
-        0.15 * uncertainty_bonus -
-        0.1 * cost_score
-    )
-
-    return {
-        "utility": utility,
-        "success_score": success_score,
-        "novelty_score": novelty_score,
-        "diversity_score": diversity_score,
-        "uncertainty_bonus": uncertainty_bonus,
-        "pred_f1": pred["f1"], "pred_f2": pred["f2"], "pred_f3": pred["f3"]
-    }
-
-def layer1_acquisition_ranking(
-    candidates, failure_predictor,
-    known_structures, composition_counts,
-    top_k=5000
-):
-    """用 acquisition function 排序，选 top-k 候选"""
-    scored = []
-    for struct in candidates:
-        acq = compute_acquisition_score(
-            struct, failure_predictor,
-            known_structures, composition_counts
-        )
-        scored.append((struct, acq))
-
-    scored.sort(key=lambda x: x[1]["utility"], reverse=True)
-    passed = scored[:top_k]
-
-    print(f"Layer 1: {len(candidates)} → {len(passed)} "
-          f"(top utility={passed[0][1]['utility']:.3f})")
-    return passed
-```
-
-#### Layer 2：单 MLIP 弛豫 + $E_{\text{hull}}$（秒级）
-
-```python
-from mace.calculators import mace_mp
-from ase.optimize import BFGS
-from pymatgen.io.ase import AseAtomsAdaptor
-
-def layer2_mlip_relaxation(
-    candidates, ehull_threshold=0.1
-):
-    """MACE-MP-0 (Batatia et al., NeurIPS 2022) 弛豫 + E_hull 筛选 [8]"""
-    calc = mace_mp(model="medium", device="cuda")
-    passed = []
-
-    for struct in candidates:
-        atoms = AseAtomsAdaptor.get_atoms(struct)
-        atoms.calc = calc
-        opt = BFGS(atoms, logfile=None)
-        opt.run(fmax=0.05, steps=200)
-
-        e_per_atom = atoms.get_potential_energy() / len(atoms)
-        e_hull = compute_ehull(struct, e_per_atom)  # 需凸包数据
-
-        if e_hull < ehull_threshold:
-            passed.append((struct, e_hull))
-
-    print(f"Layer 2: {len(candidates)} → {len(passed)}")
-    return passed
-```
-
-#### Layer 3：可合成性评估（CSLLM, Sun et al., _Nature Comm._ 2025 [17]）
-
-```python
-def layer3_synthesizability(
-    candidates, csllm_model, threshold=0.5
-):
-    """
-    CSLLM 可合成性分类器 (Sun et al., *Nature Communications* 2025) [17]
-    GitHub: https://github.com/szl666/CSLLM
-
-    输入：晶体结构的文本表示
-    输出：可合成性概率 (0-1)
-    """
-    passed = []
-    for struct, e_hull in candidates:
-        # 将结构转为 CSLLM 输入格式
-        text_repr = structure_to_csllm_format(struct)
-        synth_score = csllm_model.predict(text_repr)
-
-        if synth_score > threshold:
-            passed.append((struct, e_hull, synth_score))
-
-    print(f"Layer 3: {len(candidates)} → {len(passed)}")
-    return passed
-```
-
-<aside>
-💡
-
-**安装 CSLLM [17]**：`git clone https://github.com/szl666/CSLLM.git`
-TPR（真阳性率）约 98.8% 的可合成性预测（Sun et al., _Nature Communications_ 2025）。
-
-</aside>
-
-#### Layer 4：多 MLIP 交叉验证（Anti-Reward-Hacking）
-
-```python
-def layer4_multi_mlip_validation(
-    candidates, ehull_threshold=0.1
-):
-    """
-    三个独立 MLIP 交叉验证: MACE-MP-0 (Batatia et al., 2022) [8], CHGNet (Deng et al., 2023) [9], M3GNet (Chen & Ong, 2022) [10]
-    只保留三者一致判定稳定的结构
-    """
-    from chgnet.model import CHGNet
-    from chgnet.model.dynamics import CHGNetCalculator
-    import matgl
-    from matgl.ext.ase import M3GNetCalculator
-
-    # 初始化三个计算器
-    calc_mace = mace_mp(model="medium", device="cuda")
-    chgnet = CHGNet.load()
-    calc_chgnet = CHGNetCalculator(model=chgnet)
-    pot = matgl.load_model("M3GNet-MP-2021.2.8-PES")
-    calc_m3gnet = M3GNetCalculator(potential=pot)
-
-    passed = []
-    for struct, e_hull_mace, synth_score in candidates:
-        atoms = AseAtomsAdaptor.get_atoms(struct)
-
-        # CHGNet 弛豫
-        atoms_chg = atoms.copy()
-        atoms_chg.calc = calc_chgnet
-        opt = BFGS(atoms_chg, logfile=None)
-        opt.run(fmax=0.05, steps=200)
-        e_hull_chgnet = compute_ehull(
-            struct,
-            atoms_chg.get_potential_energy() / len(atoms_chg)
-        )
-
-        # M3GNet 弛豫
-        atoms_m3g = atoms.copy()
-        atoms_m3g.calc = calc_m3gnet
-        opt = BFGS(atoms_m3g, logfile=None)
-        opt.run(fmax=0.05, steps=200)
-        e_hull_m3gnet = compute_ehull(
-            struct,
-            atoms_m3g.get_potential_energy() / len(atoms_m3g)
-        )
-
-        # 要求 2/3 或 3/3 一致判定稳定
-        stable_count = sum([
-            e_hull_mace < ehull_threshold,
-            e_hull_chgnet < ehull_threshold,
-            e_hull_m3gnet < ehull_threshold
-        ])
-
-        if stable_count >= 2:  # 至少 2/3 一致
-            passed.append({
-                "structure": struct,
-                "e_hull_mace": e_hull_mace,
-                "e_hull_chgnet": e_hull_chgnet,
-                "e_hull_m3gnet": e_hull_m3gnet,
-                "synth_score": synth_score
-            })
-
-    print(f"Layer 4: {len(candidates)} → {len(passed)}")
-    return passed
-```
-
-#### Layer 4.5（FIIR-v2 新增）：Near-miss Repair + 3D Pareto Ranking
-
-```python
-def pareto_ranking_3d(candidates, objectives=["stability", "novelty", "diversity"]):
-    """
-    3D Pareto Ranking（替代硬阈值筛选）。
-    在 stability × novelty × diversity 三个目标上做 Pareto 排序。
-    """
-    n = len(candidates)
-    # 提取 3 个目标值
-    obj_matrix = np.array([
-        [c["acq"]["success_score"], c["acq"]["novelty_score"],
-         c["acq"]["diversity_score"]]
-        for c in candidates
-    ])
-
-    # 计算 Pareto front layers
-    pareto_layers = []
-    remaining = set(range(n))
-
-    while remaining:
-        current_front = []
-        for i in remaining:
-            dominated = False
-            for j in remaining:
-                if i == j:
-                    continue
-                if all(obj_matrix[j] >= obj_matrix[i]) and any(obj_matrix[j] > obj_matrix[i]):
-                    dominated = True
-                    break
-            if not dominated:
-                current_front.append(i)
-
-        pareto_layers.append(current_front)
-        remaining -= set(current_front)
-
-    # 返回按 Pareto layer 排序的候选
-    ranked = []
-    for layer_idx, layer in enumerate(pareto_layers):
-        for idx in layer:
-            candidates[idx]["pareto_layer"] = layer_idx
-            ranked.append(candidates[idx])
-
-    return ranked
-
-def select_representative_structures(pareto_candidates, n_select=200):
-    """
-    k-medoids 聚类选择代表性结构（避免 Pareto front 上聚集过密的区域）。
-    """
-    features = np.array([
-        [c["acq"]["success_score"], c["acq"]["novelty_score"],
-         c["acq"]["diversity_score"]]
-        for c in pareto_candidates[:min(1000, len(pareto_candidates))]
-    ])
-
-    kmedoids = KMedoids(n_clusters=min(n_select, len(features)), random_state=42)
-    kmedoids.fit(features)
-    selected_indices = kmedoids.medoid_indices_
-
-    return [pareto_candidates[i] for i in selected_indices]
-
-def near_miss_repair(candidates, ehull_range=(0.05, 0.15)):
-    """
-    Near-miss Repair（FIIR-v2 新增）：
-    对 F3 near-miss 候选做局部结构优化，尝试"推"过稳定性阈值。
-    仅做局部弛豫（不改变化学组成），限制为：
-    - lattice strain relaxation
-    - Wyckoff position refinement
-    """
-    repaired = []
-    for cand in candidates:
-        e_hull = cand.get("e_hull_mace", 1.0)
-        if ehull_range[0] <= e_hull <= ehull_range[1]:
-            struct = cand["structure"]
-
-            # 局部弛豫：更严格的收敛条件
-            from ase.optimize import BFGS
-            from pymatgen.io.ase import AseAtomsAdaptor
-            from mace.calculators import mace_mp
-
-            atoms = AseAtomsAdaptor.get_atoms(struct)
-            atoms.calc = mace_mp(model="large", device="cuda")  # 用更大模型
-            opt = BFGS(atoms, logfile=None)
-            opt.run(fmax=0.01, steps=500)  # 更严格收敛
-
-            repaired_struct = AseAtomsAdaptor.get_structure(atoms)
-            new_e_hull = compute_ehull(
-                repaired_struct,
-                atoms.get_potential_energy() / len(atoms)
-            )
-
-            if new_e_hull < e_hull:  # 确实改善了
-                cand["structure_repaired"] = repaired_struct
-                cand["e_hull_repaired"] = new_e_hull
-                cand["repair_delta"] = e_hull - new_e_hull
-                repaired.append(cand)
-
-    print(f"Near-miss repair: {len(repaired)} structures improved")
-    return repaired
-```
-
-#### Layer 5：DFT 精确验证
-
-```python
-def layer5_dft_validation(top_candidates, dft_code="vasp"):
-    """
-    对 Top-50 结构运行 DFT 完整弛豫
-
-    推荐设置：
-    - VASP 或 Quantum ESPRESSO
-    - PBE 泛函
-    - 完整 ionic + cell relaxation
-    - Band gap 计算 (PBE 或 HSE06)
-    """
-    from pymatgen.io.vasp.sets import MPRelaxSet
-
-    for i, cand in enumerate(top_candidates):
-        struct = cand["structure"]
-
-        # 生成 VASP 输入文件
-        relax_set = MPRelaxSet(struct)
-        relax_set.write_input(f"dft_runs/candidate_{i:03d}")
-
-    print(f"已生成 {len(top_candidates)} 个 DFT 计算任务")
-    print("请提交到 HPC 集群运行，预计 2-4 周")
-```
+1. **DFT 结果双向反馈**：
+   - 成功的结构进入新材料库
+   - 失败的结构（DFT 验证不通过）其失败信息反馈回 Failure Predictor 训练集
+   - 所有 DFT 结果更新 Calibration Tier 边界
+2. **Predictor 持续改进**：每轮 DFT 验证后，Predictor 在更准确的数据上重训
+3. **FSAL 可选迭代**：若资源允许，DFT 反馈也可用于更新 FSAL 的 preference pair
 
 ---
 
-## Step 3：运行 Active Discovery Loop（FIIR-v2 升级版）
+## 五、应用场景选择原则
 
-```python
-def run_active_discovery_loop(
-    fsal_model,          # Paper 2 训练的 FSAL-v2 模型
-    failure_predictor,   # Paper 1 训练的 Failure Predictor
-    csllm_model,         # CSLLM 可合成性模型 [17]
-    n_generate=50000,
-    n_active_rounds=3    # Active Loop 轮数
-):
-    """FIIR-v2 Active Discovery Loop"""
-    all_discoveries = []
-    known_structures = []  # 已知结构池（用于 novelty 计算）
-    composition_counts = {}  # 组成计数（用于 diversity 计算）
+Paper 3 需要选择具体的材料发现场景来展示实用价值。选择原则：
 
-    for loop_round in range(n_active_rounds):
-        print(f"\n=== Active Discovery Round {loop_round+1}/{n_active_rounds} ===")
+### 场景要求
 
-        # 1. 生成 + Pre-filtering
-        print("Step 1: 生成候选晶体...")
-        candidates = fsal_model.generate(n_generate)
-        candidates = [c for c in candidates
-                      if pre_filter_trivially_invalid(c)[0]]
-        print(f"  Pre-filter 后: {len(candidates)} 个候选")
+1. **社区关注度高**：目标材料体系应被材料科学社区广泛关注
+2. **有明确的实验可验证性**：发现的材料有现实的合成/验证可能性
+3. **有合理的 baseline 对比**：该场景已有其他生成模型的结果可以对比
+4. **有足够的已知数据**：用于 novelty 检查和 leakage control
 
-        # 2. Acquisition Function 排序（替代硬阈值）
-        print("Step 2: Acquisition function 排序...")
-        scored = layer1_acquisition_ranking(
-            candidates, failure_predictor,
-            known_structures, composition_counts
-        )
+### 推荐场景方向（v2.1：必须选定一个具体场景）
 
-        # 3. MLIP 弛豫
-        print("Step 3: MLIP 弛豫验证...")
-        l2_passed = layer2_mlip_relaxation(
-            [s for s, _ in scored[:5000]]
-        )
+- **固态电解质**（首选）：社区需求极大，锂离子传导体系数据丰富，Alexandria [13] 覆盖广，有明确的 DFT 验证标准（离子传导率、电化学稳定窗口）
+- **锂电正极材料**：层状/尖晶石/橄榄石体系成熟，baseline 对比充分
+- **热电材料**：结构多样性要求高，适合展示 FIIR 的多样性保持优势
+- **钙钛矿氧化物**（ABX₃）：数据丰富，pair matching 天然按化学体系分组
 
-        # 4. 可合成性
-        print("Step 4: 可合成性评估...")
-        l3_passed = layer3_synthesizability(l2_passed, csllm_model)
-
-        # 5. 多 MLIP 交叉验证
-        print("Step 5: 多 MLIP 交叉验证...")
-        l4_passed = layer4_multi_mlip_validation(l3_passed)
-
-        # 6. 3D Pareto Ranking + k-medoids 选择
-        print("Step 6: Pareto ranking + representative selection...")
-        for cand in l4_passed:
-            cand["acq"] = compute_acquisition_score(
-                cand["structure"], failure_predictor,
-                known_structures, composition_counts
-            )
-        ranked = pareto_ranking_3d(l4_passed)
-        representatives = select_representative_structures(ranked, n_select=100)
-
-        # 7. Near-miss Repair
-        print("Step 7: Near-miss repair...")
-        repaired = near_miss_repair(representatives)
-
-        # 8. 合并 + 选 Top-50 for DFT
-        all_candidates = representatives + repaired
-        top_50 = sorted(all_candidates,
-                       key=lambda x: x.get("e_hull_repaired", x["e_hull_mace"]))[:50]
-
-        # 9. DFT 验证
-        print("Step 8: 准备 DFT 验证...")
-        layer5_dft_validation(top_50)
-
-        # 10. 数据库比对
-        print("Step 9: 数据库新颖性比对...")
-        check_novelty(top_50)
-
-        # 11. Feedback: 更新已知结构池和 acquisition function
-        for cand in top_50:
-            known_structures.append(cand["structure"])
-            comp = cand["structure"].composition.reduced_formula
-            composition_counts[comp] = composition_counts.get(comp, 0) + 1
-
-        all_discoveries.extend(top_50)
-        print(f"  本轮发现 {len(top_50)} 个候选")
-
-    print(f"\n总计发现 {len(all_discoveries)} 个候选")
-    return all_discoveries
-```
+**v2.1 执行要求**：在 Paper 1/2 完成后，基于以下标准选定唯一目标场景：① 数据可用性，② 计算预算可行性，③ DFT 验证标准明确性，④ 社区影响力。不允许泛泛地跑"全体系 discovery"。
 
 ---
 
-## Step 4：数据库新颖性比对
+## 六、Claim-Based 实验设计
 
-```python
-from pymatgen.analysis.structure_matcher import StructureMatcher
-
-def check_novelty(candidates, databases=["mp", "icsd", "alexandria"]):
-    """
-    比对四个数据库，确认结构的新颖性
-    """
-    matcher = StructureMatcher(
-        ltol=0.2,   # 晶格容差
-        stol=0.3,   # 位点容差
-        angle_tol=5 # 角度容差
-    )
-
-    novel_count = 0
-    for cand in candidates:
-        is_novel = True
-        for db_name in databases:
-            db_structures = load_database(db_name)  # 自行实现
-            for known_struct in db_structures:
-                if matcher.fit(cand["structure"], known_struct):
-                    is_novel = False
-                    break
-            if not is_novel:
-                break
-
-        cand["is_novel"] = is_novel
-        if is_novel:
-            novel_count += 1
-
-    print(f"新颖结构: {novel_count}/{len(candidates)}")
-    return candidates
-```
+| Claim                                         | 验证方法                                                                                    | 预期结论                                    |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| **FIIR pipeline 提升 discovery hit rate**     | 端到端对比：Baseline / CrystalFormer-RL [1] / PLaID++ [25] / OMatG-IRL [26] / FSAL pipeline | 固定 DFT 预算下 FSAL 命中率最高             |
+| **Failure Predictor > energy-only screening** | 用 Failure Predictor 选候选 vs 仅用 $E_{\text{hull}}$ 排序选候选                            | 五维 failure 信息带来更高命中率             |
+| **Constrained qEHVI > 简单 Pareto**           | Constrained qEHVI vs 简单 Pareto 排序 vs 纯 exploit vs 纯 explore                           | qEHVI 在多轮中累积发现最多且质量最优        |
+| **Conformal UQ > ensemble disagreement**      | Conformal prediction [44] vs MLIP ensemble std 在 validation ladder 中的覆盖率与校准性      | Conformal prediction 提供更可靠的覆盖率保证 |
+| **可合成性筛选提升实用性**                    | 有 F5 筛选（CLscore + CSLLM）vs 无 F5 筛选                                                  | F5 筛选后推荐结构的实验可合成率更高         |
+| **验证阶梯节省计算**                          | 有 Layer 2（Predictor 快筛）vs 无 Layer 2                                                   | Predictor 快筛节省大量 MLIP 计算            |
+| **Active learning 闭环有效**                  | 闭环（DFT 反馈更新 Predictor）vs 开环（不更新）                                             | 闭环在后续轮次持续改善                      |
+| **发现的材料具有真正 novelty + 可合成性**     | 与 ICSD / Materials Project / GNoME / 训练集去重 + CLscore/CSLLM 验证                       | 发现的稳定结构不在已知数据库中且可合成      |
 
 ---
 
-## Step 5：关键实验清单
+## 七、评价框架
 
-### Pipeline 端到端对比
+### 核心指标
 
-| 方法                                                  | 生成量 | MLIP 通过 | 可合成 | DFT 验证 | 全新 |
-| ----------------------------------------------------- | ------ | --------- | ------ | -------- | ---- |
-| Baseline M₀ + MLIP 筛选                               | 50,000 | ?         | ?      | ?        | ?    |
-| CrystalFormer-RL [1] + MLIP 筛选                      | 50,000 | ?         | ?      | ?        | ?    |
-| PLaID++ [25] + MLIP 筛选                              | 50,000 | ?         | ?      | ?        | ?    |
-| OMatG-IRL [26]（推理时 RL）+ MLIP 筛选                | 50,000 | ?         | ?      | ?        | ?    |
-| Self-Correcting Search [28] 风格（推理时 probe 引导） | 50,000 | ?         | ?      | ?        | ?    |
-| **FSAL + Repair + 多保真 Pipeline**                   | 50,000 | ?         | ?      | ?        | ?    |
+- **Discovery Hit Rate**：DFT 验证通过的新材料数 / 总 DFT 计算次数
+- **Novelty Rate**：通过 DFT 验证且不在任何已知数据库中的比例（F4 验证）
+- **Synthesizability Rate**：通过 DFT 验证且 CLscore/CSLLM 判定可合成的比例（F5 验证）
+- **Cost Efficiency**：达到 N 个新材料发现所需的总计算量
+- **Per-round Improvement**：闭环中每轮 DFT 后 hit rate 的改善
+- **Material Diversity**：发现的新材料覆盖了多少化学体系 / 空间群
+- **UQ Calibration**：Conformal prediction 区间的实际覆盖率 vs 名义覆盖率
 
-### 其他关键实验
+### 对比方法
 
-- [ ] **Reward Hacking 分析**：ML 稳定 vs DFT 稳定的一致率；多 MLIP 如何降低假阳性；参考 Nature Machine Intelligence 2025 的 MLIP 评估框架 [33]
-- [ ] **可合成性闭环价值**："只筛稳定性" vs "稳定性 + 可合成性" 对比
-- [ ] **Case Study**：Top-5 新发现结构详细展示（可视化 + DFT 电子结构 + 与已知材料对比）
-- [ ] **数据泄漏审计**：对所有 DFT 通过结构，逐一与 Alexandria/MP/ICSD/GNoME 做 `StructureMatcher` 比对并报告去重结果
-- [ ] **Reward Hacking 详细分析**：报告各 MLIP 的假阳性率和假阴性率（以 DFT 为 ground truth）
-- [ ] **分层筛选效率**：各层的保留率和计算成本
-- [ ] **FSAL vs 推理时方法端到端对比**：PLaID++ [25]、OMatG-IRL [26]、Self-Correcting Search [28] 风格的推理时引导各走一遍 pipeline，以 DFT 验证通过数和发现新颖结构数为最终评判
-- [ ] **LeMat-GenBench 对齐**：所有方法在 LeMat-GenBench [18] leaderboard 上报告标准指标，确保与社区可比
+1. **Random Sampling + DFT**：随机生成 → 直接 DFT 验证
+2. **Base Model + Energy Screening + DFT**：生成 → $E_{\text{hull}}$ 排序 → DFT
+3. **CrystalFormer-RL [1] + Screening + DFT**
+4. **PLaID++ [25] + Screening + DFT**
+5. **OMatG-IRL [26] + Screening + DFT**
+6. **FSAL + Failure Predictor + Validation Ladder + DFT**（我们的方法）
 
 ---
 
-## Step 6：DFT 结果分析
+## 八、论文写作定位
 
-```python
-def analyze_dft_results(dft_results, ml_predictions):
-    """
-    分析 DFT 结果，对比 ML 预测
-    """
-    concordance = []
-    for res in dft_results:
-        dft_ehull = res["dft_e_hull"]
-        ml_ehull = ml_predictions[res["id"]]["e_hull_mace"]
+### 目标 Venue
 
-        concordance.append({
-            "id": res["id"],
-            "dft_stable": dft_ehull < 0.1,
-            "ml_stable": ml_ehull < 0.1,
-            "dft_ehull": dft_ehull,
-            "ml_ehull": ml_ehull,
-            "error": abs(dft_ehull - ml_ehull),
-            "band_gap": res.get("band_gap"),
-        })
-
-    # 统计
-    ml_correct = sum(1 for c in concordance
-                     if c["dft_stable"] == c["ml_stable"])
-    print(f"ML-DFT 一致率: {ml_correct/len(concordance)*100:.1f}%")
-
-    novel_stable = sum(1 for c in concordance if c["dft_stable"])
-    print(f"DFT 验证通过: {novel_stable}/{len(concordance)}")
-
-    return concordance
-```
-
----
-
-## 论文写作要点
-
-### 标题
-
-> _"From Failure to Discovery: Multi-Fidelity Crystal Generation with Failure-Structured Alignment"_
+npj Computational Materials / Chemistry of Materials
 
 ### 核心卖点
 
-1. **Active Discovery Loop**：Failure Predictor 从被动 reranking 升级为主动 acquisition function——同时考虑 success probability + novelty + diversity + uncertainty（FIIR-v2 升级）
-2. **3D Pareto Ranking + k-medoids**：用 Pareto 排序替代硬阈值，k-medoids 确保选出的代表性结构覆盖多样化区域（FIIR-v2 升级）
-3. **Near-miss Repair**：对 F3 near-miss 做局部结构优化，"推"过稳定性阈值（FIIR-v2 升级）
-4. **可合成性闭环**：CSLLM [17] 评估可合成性
-5. **Anti-reward-hacking**：多 MLIP 交叉验证 [8][9][10]
-6. **DFT 验证的新结构**：一个经 DFT 验证的新结构比 10 个指标表格都有说服力
+1. **首个 failure-informed active crystal discovery pipeline**：不只是"生成更好的结构"，而是"在有限预算下发现更多新材料"
+2. **Failure Predictor + constrained qEHVI**：将五维失败信息从"标签"升级为多目标优化的 acquisition function
+3. **Conformal prediction UQ**：首次在晶体材料发现中使用 distribution-free 不确定性保证，替代启发式 ensemble disagreement
+4. **可合成性感知的 validation ladder**：不只筛稳定性，还筛可合成性（CLscore + CSLLM），提升实验可实现率
+5. **端到端闭环验证**：从生成到 DFT 验证的完整 pipeline，有真实的材料发现结果
 
-<aside>
-🏆
+### 关键叙事
 
-**期望成果**：发现 3–10 个 DFT 验证通过的全新稳定结构，其中 1–3 个同时通过可合成性评估。
+> 现有的晶体生成方法关注"生成质量"——能否产生稳定的结构。但材料科学家真正关心的是"发现效率"和"实验可实现性"——在有限的计算和实验预算下，能否更快地找到真正可合成的新材料？Paper 3 证明，FIIR 的失败感知方法不仅提高生成质量，更通过五维失败感知 + 多目标优化 + 可合成性筛选，直接提升了材料发现的实用效率。
 
-</aside>
+### 论文结构建议
 
-### 风险应对
+1. Introduction：材料发现中的效率瓶颈 + 可合成性 gap
+2. Method：FSAL 生成 → Constrained qEHVI 多目标选择 → 多层验证（含 Conformal UQ + 可合成性筛选）→ DFT 反馈闭环
+3. Application Scenario：选定的目标材料体系
+4. Results：Discovery hit rate + novelty + synthesizability + cost efficiency
+5. Analysis：闭环中 Predictor 改善 + Conformal UQ 校准分析 + 发现材料的科学分析
 
-- **DFT 通过率低** → 扩大生成量到 100,000 + near-miss repair 额外挽救；即使 1–2 个全新结构也有说服力
-- **结构已存在于数据库** → 独立发现 = rediscovery = 方法有效性证据
-- **F4 分类器不准** → 作为软筛选；报告有/无 F4 对比
-- **Active Loop 计算成本高** → 多保真 budget 分配：Tier 4 只用 Failure Predictor，Tier 2-3 用单 MLIP，Tier 1 用 DFT——而非所有候选都走全流程
+### 参考文献
 
----
-
-## 资源需求
-
-| 资源               | 估计                               |
-| ------------------ | ---------------------------------- |
-| GPU（生成 + MLIP） | 2× A100，约 1 周                   |
-| DFT 计算           | Top-50 完整 relaxation，约 2–4 周  |
-| 可合成性评估       | CSLLM + Precursor LLM，约 1–2 天   |
-| 数据库比对         | pymatgen StructureMatcher，约 1 天 |
-
----
-
-## 参考文献（本页引用）
-
-- [1] Cao & Wang, "CrystalFormer-RL: Reinforcement Fine-Tuning for Materials Design", arXiv:2504.02367, 2025. https://arxiv.org/abs/2504.02367
-- [2] Zeni et al., "MatterGen: A generative model for inorganic materials design", _Nature_, 2025. https://www.nature.com/articles/s41586-025-08628-5
-- [8] Batatia et al., "MACE: Higher Order Equivariant Message Passing Neural Networks", NeurIPS 2022; MACE-MP-0: arXiv:2401.00096. https://github.com/ACEsuit/mace
-- [9] Deng et al., "CHGNet: Pretrained universal neural network potential", _Nature Machine Intelligence_, 2023. https://doi.org/10.1038/s42256-023-00716-3
-- [10] Chen & Ong, "A universal graph deep learning interatomic potential (M3GNet)", _Nature Computational Science_, 2022. https://doi.org/10.1038/s43588-022-00349-3
-- [17] Sun et al., "Accurate prediction of synthesizability and precursors via large language models (CSLLM)", _Nature Communications_, 2025. https://doi.org/10.1038/s41467-025-61778-y ; https://github.com/szl666/CSLLM
-- [18] Betala et al., "LeMat-GenBench: A Unified Evaluation Framework for Crystal Generative Models", AI4Mat-NeurIPS 2025 Workshop. https://arxiv.org/abs/2512.04562
-- [23] Ye et al., "Con-CDVAE + Active Learning for Crystal Inverse Design", arXiv:2502.16984, 2025. https://arxiv.org/abs/2502.16984
-- [25] Xu et al., "PLaID++", ICML 2026. https://arxiv.org/abs/2509.07150
-- [26] Höllmer & Martiniani, "OMatG-IRL", AI4Mat-ICLR 2026 Workshop. https://arxiv.org/abs/2602.00424
-- [28] Goodfire, "Self-Correcting Search", 2026. https://www.goodfire.ai/research/self-correcting-search
-- [33] "A framework to evaluate ML crystal stability predictions", _Nature Machine Intelligence_, 2025. https://www.nature.com/articles/s42256-025-01055-1
-
----
-
-## 给 Codex 的实现指导
-
-Codex 根据本页面实现代码时，第一阶段只搭建 discovery pipeline skeleton。
-
-最小闭环：
-
-1. 输入生成候选结构；
-2. 调用 Failure Predictor 接口得到 failure score；
-3. 调用 screening 接口筛选候选；
-4. 调用 ranking 接口进行多目标排序；
-5. 导出 Top-K 候选；
-6. 生成 validation task metadata；
-7. 将 validation result 回写成 feedback record。
-
-不要在第一阶段实现真实 VASP、Quantum ESPRESSO、Materials Project API、CSLLM 或 MLIP 大模型调用。所有外部计算都先设计成 adapter interface。
-
-Discovery pipeline 的目标不是单纯筛掉坏结构，而是在固定计算预算下提高 DFT-stable、novel、diverse candidate 的命中率。
+[1] CrystalFormer-RL, [3] MatterGen leakage, [4] OMatG, [13] Alexandria, [17] CSLLM, [18] LeMat-GenBench, [23] Con-CDVAE Active Learning, [25] PLaID++, [26] OMatG-IRL, [27] DAO, [33] MLIP eval framework, [34] MatInvent, [42] MLIP uncertainty calibration, [43] CLscore, [44] Conformal Prediction, [48] SyntheFormer

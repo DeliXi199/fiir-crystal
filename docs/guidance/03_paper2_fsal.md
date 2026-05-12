@@ -1,788 +1,291 @@
-## GitHub/Codex 导出信息
-
-- Repository name: `fiir-crystal`
-- Repository role: Paper 2 指导文档
-- Export path: `docs/guidance/03_paper2_fsal.md`
-- Document type: implementation guidance
-- Main code module: `fiir_crystal.fsal`
-- Related modules:
-  - `fiir_crystal.failure`
-  - `fiir_crystal.generation`
-  - `fiir_crystal.evaluation`
-- Main spec file to generate:
-  - `docs/specs/fsal_algorithm.md`
-
----
-
-## 工程实现边界
-
-本页面用于指导 FSAL 模块实现。代码实现应围绕以下组件展开：
-
-1. `fiir_crystal.fsal.preference_data`
-   - 定义 preference pair 数据结构。
-   - 支持 winner、loser、axis、margin、confidence、metadata。
-2. `fiir_crystal.fsal.pair_mining`
-   - 实现 matched axis-aligned pair mining。
-   - 不只比较 F1/F2/F3 分数，还要支持 composition、atom count、space group、prototype 等匹配条件。
-3. `fiir_crystal.fsal.dpo`
-   - 实现 DPO trainer 接口。
-   - 第一阶段只实现 trainer skeleton，不实现完整深度学习训练。
-4. `fiir_crystal.fsal.losses`
-   - 预留 standard DPO、confidence-weighted DPO、margin DPO 等损失接口。
-5. `fiir_crystal.fsal.adapters`
-   - 预留 per-axis LoRA / adapter bank 接口。
-   - F1/F2/F3 可分别对应不同 adapter。
-6. `fiir_crystal.generation`
-   - 定义生成模型 wrapper。
-   - 支持 CrystalFormer 或其他模型接入，但第一阶段只做抽象接口。
-
----
-
-## 实施目标
-
 <aside>
 🎯
 
-实现 **FSAL-v2（Failure-Structured Alignment Learning）**——通过 **Matched Axis-Aligned Pairing + Confidence-Weighted Margin DPO + On-Policy Refresh**，显著优于 binary/energy-only/weighted-sum feedback 来对齐晶体生成模型。FIIR-v2 核心升级：pair 构造从纯 score-aligned 升级为化学/结构匹配后的因果配对；DPO 从 uniform-weight 升级为 CW-Margin；每轮迭代 on-policy 刷新。
+**Paper 2 科学使命（v2.2 收敛版）**：证明结构化失败信号（F1/F2/F3 为训练主轴，而非标量奖励）可以通过 axis-aligned preference alignment 系统性地改进晶体生成模型——更可诊断、更可解释、更鲁棒。方法在自回归基座上完整验证，在扩散/flow 基座上做 pilot 验证证明可适配性。Paper 2 是 FIIR 体系的旗舰论文。
 
-</aside>
-
-**目标 Venue**：NeurIPS / ICML 主会
-
-**预估工期**：3–5 个月
-
-**前置依赖**：Paper 1 的 failure taxonomy 和标注数据
-
----
-
-## Step 1：准备基座模型
-
-### 1.1 主实验：CrystalFormer
-
-```bash
-# 克隆并安装 CrystalFormer (Cao & Wang, 2025) [1]
-git clone https://github.com/deepmodeling/CrystalFormer.git
-cd CrystalFormer
-pip install -e .
-
-# 下载预训练权重（Alex-20 训练集）
-# 参考仓库 README 中的 model checkpoint 链接
-wget <checkpoint_url> -O checkpoints/crystalformer_alex20.pt
-```
-
-**为什么选 CrystalFormer**：
-
-- 开源，有 RL 版本可直接 head-to-head 对比 [1]
-- 自回归结构天然支持 DPO 训练（序列级别的偏好学习）
-- 与我们的训练数据集（Alex-20）一致
-
-### 1.2 第二基座（FIIR-v2 必做：验证 base-model agnostic）
-
-<aside>
-🔴
-
-**FIIR-v2 核心升级**：多基座验证从"可选"升级为"必做"（实验 #17）。选择一个扩散/flow 基座，证明 FSAL 不是只在自回归模型上有效。
-
-</aside>
-
-- **首选 DiffCSP++** (Jiao et al., ICLR 2024) [20]：扩散模型代表，开源成熟
-- **备选 OMatG** (Höllmer et al., ICML 2025) [4]：当前 LeMat-GenBench [18] SOTA，flow-based
-
-**扩散/flow 模型的 DPO 适配要点**：
-
-- 扩散模型没有显式 token-level log probability → 使用 DDPM-style ELBO 作为序列级 log likelihood 的代理
-- 或采用 DiffDPO 策略：在去噪轨迹上定义偏好，比较 winner/loser 的去噪轨迹 likelihood
-- 关键：保持与 CrystalFormer 实验的控制变量（同数据、同 failure labels、同 pair 构造）
-
-<aside>
-⚠️
-
-**不用 MatterGen (Zeni et al., _Nature_ 2025) [2]** 的原因：Materials Horizons 2026 已确认其训练集泄漏问题 (_Materials Horizons_ 2026) [3]——声称的"新颖"结构实为训练集已知化合物。且 adapter 机制与 preference learning 难以公平对比。
+**执行原则（v2.2）**：先做最小可验证版本（Minimal Viable FSAL = pre-filtering + matched F1/F2/F3 pairs + confidence-weighted DPO + per-dimension evaluation），其他组件作为消融分层加入。
 
 </aside>
 
 ---
 
-## Step 2：构造 Near-miss 偏好数据
+## 一、核心科学主张
 
-### 2.1 生成候选 + 失败标注
+Paper 2 需要回答一个根本问题：**结构化失败信号如何被转化为有效的生成模型训练信号？**
 
-```python
-def generate_and_label(model, num_samples=10000):
-    """使用基座模型生成候选并进行失败标注"""
-    candidates = model.generate(num_samples)
+核心主张（按优先级排序）：
 
-    success_pool = []  # E_hull < 0.1 eV/atom
-    failure_pool = []  # E_hull >= 0.1 eV/atom
-
-    for struct in candidates:
-        fv = generate_failure_vector(struct)  # Paper 1 的标注函数
-        if fv["f3_stability"] < 0.1:
-            success_pool.append((struct, fv))
-        else:
-            failure_pool.append((struct, fv))
-
-    return success_pool, failure_pool
-```
-
-### 2.2 Pre-filtering + 按 $E_{\text{hull}}$ 分三档
-
-```python
-def generate_and_label_v2(model, num_samples=10000, mlip_calculators=None):
-    """
-    FIIR-v2 升级版：增加 pre-filtering + calibration tier。
-    """
-    candidates = model.generate(num_samples)
-
-    success_pool = []
-    failure_pool = []
-    pre_filtered = []  # 被 pre-filter 移除的明显非法结构
-
-    for struct in candidates:
-        fv = generate_failure_vector(struct, mlip_calculators)
-
-        if fv.get("pre_filtered", False):
-            pre_filtered.append((struct, fv))
-            continue  # 不参与 DPO 训练
-
-        if fv["f3_stability"] < 0.1:
-            success_pool.append((struct, fv))
-        else:
-            failure_pool.append((struct, fv))
-
-    print(f"Pre-filtered: {len(pre_filtered)}, "
-          f"Success: {len(success_pool)}, Failure: {len(failure_pool)}")
-    return success_pool, failure_pool, pre_filtered
-
-def categorize_failures(failure_pool):
-    """将失败样本分为 near-miss / moderate / catastrophic"""
-    near_miss = []    # 0.1-0.2 eV/atom → ~60% 配额
-    moderate = []     # 0.2-0.5 eV/atom → ~30% 配额
-    catastrophic = [] # >0.5 eV/atom   → ~10% 配额
-
-    for struct, fv in failure_pool:
-        e_hull = fv["f3_stability"]
-        if 0.1 <= e_hull <= 0.2:
-            near_miss.append((struct, fv))
-        elif 0.2 < e_hull <= 0.5:
-            moderate.append((struct, fv))
-        else:
-            catastrophic.append((struct, fv))
-
-    print(f"Near-miss: {len(near_miss)}, "
-          f"Moderate: {len(moderate)}, "
-          f"Catastrophic: {len(catastrophic)}")
-    return near_miss, moderate, catastrophic
-```
+1. **Structured > Scalar**：F1/F2/F3 结构化失败反馈优于标量奖励（PPO [1]）或加权总分偏好（PLaID++ [25]）——这是最核心的 claim
+2. **Axis-aligned > Weighted-sum**：维度解耦的偏好对优于混合维度的偏好对（head-to-head PLaID++ 对比）
+3. **Matched > Random**：因果控制的匹配配对优于随机负样本配对
+4. **Training-time > Inference-time**：训练时对齐（FSAL）优于推理时引导（路线 C）
+5. **Reward hacking is mitigable**：fixed audit + targeted audit + proxy-true divergence 可有效防止 reward hacking
+6. **FSAL is architecture-adaptable**（降级 claim）：在自回归基座上完整验证；扩散/flow 基座做 pilot 验证证明方法思想可迁移，但不要求所有指标打穿
 
 ---
 
-## Step 3：Matched Axis-Aligned Preference Construction（FIIR-v2 核心升级）
+## 二、为什么结构化失败 > 标量奖励
 
-<aside>
-🔑
+### 标量奖励的三个根本问题
 
-**FIIR-v2 三重升级**：① 从纯 score-aligned 升级为 **Matched Pairing**（化学/结构匹配后的因果配对）；② 引入 `pair_quality` 综合评分过滤低质量 pair；③ 融入 **calibration tier** 作为 label confidence。不将多维失败压成加权标量——我们构造**单维度主导、混杂变量受控**的偏好对。
+现有方法（CrystalFormer-RL [1] 用 MLIP energy 做 PPO，PLaID++ [25] 用 weighted-sum 做 DPO）将多维失败信息压缩为单一标量。这导致：
 
-</aside>
+1. **信息损失**：不同失败原因被混合，模型无法区分"几何坏"和"化学坏"
+2. **权重任意性**：$\alpha_1 F_1 + \alpha_2 F_2 + \cdots + \alpha_5 F_5$ 的权重缺乏科学依据，且最优权重可能随训练阶段变化
+3. **不可解释性**：模型改进后无法归因到具体失败维度，无法诊断改善来源
+4. **Reward hacking 风险**：标量 reward 更容易被模型利用——模型可能学会生成"骗过"MLIP 但物理上不合理的结构（Goodhart's Law [49]）
 
-### 3.1 Matched Axis-Aligned Pair 构造（FIIR-v2）
+### FSAL 的核心立场
 
-```python
-import numpy as np
-from typing import List, Tuple, Dict
-
-def compute_structure_match_score(struct_a, struct_b) -> float:
-    """
-    计算两个结构的匹配度（软加权部分）。
-    综合考虑晶系相似度 + prototype 相似度。
-    返回 0-1，越高越匹配。
-    """
-    score = 0.0
-
-    # (a) 化学体系匹配（硬匹配已在外层处理）
-    # (b) 晶系相似度
-    sg_a = struct_a.get_space_group_info()[1]
-    sg_b = struct_b.get_space_group_info()[1]
-    crystal_sys_a = get_crystal_system(sg_a)  # cubic/hexagonal/...
-    crystal_sys_b = get_crystal_system(sg_b)
-    if crystal_sys_a == crystal_sys_b:
-        score += 0.5
-    elif are_related_systems(crystal_sys_a, crystal_sys_b):
-        score += 0.25
-
-    # (c) 原子数相似度
-    n_a, n_b = len(struct_a), len(struct_b)
-    atom_ratio = min(n_a, n_b) / max(n_a, n_b)
-    score += 0.3 * atom_ratio
-
-    # (d) 组成相似度（元素重叠）
-    els_a = set(str(e) for e in struct_a.composition.elements)
-    els_b = set(str(e) for e in struct_b.composition.elements)
-    jaccard = len(els_a & els_b) / len(els_a | els_b)
-    score += 0.2 * jaccard
-
-    return min(score, 1.0)
-
-def construct_matched_axis_aligned_pairs(
-    success_pool: list,
-    failure_pool: list,
-    dim: int,  # 0=F1, 1=F2, 2=F3
-    threshold_main: float = 0.3,
-    threshold_other: float = 0.15,
-    min_pair_quality: float = 0.3,
-    max_pairs: int = 5000
-) -> List[Dict]:
-    """
-    FIIR-v2 Matched Axis-Aligned Pair 构造。
-    两层匹配：硬匹配（同化学体系+原子数±20%）+ 软加权（结构匹配度）。
-    返回带 pair_quality 的偏好对列表。
-    """
-    pairs = []
-    dims = ["f1_geometry", "f2_chemistry", "f3_stability"]
-    main_dim = dims[dim]
-    other_dims = [d for i, d in enumerate(dims) if i != dim]
-
-    all_samples = [(s, fv) for s, fv in success_pool + failure_pool
-                   if not fv.get("pre_filtered", False)]
-
-    # 按化学体系分桶（硬匹配第一层）
-    buckets = {}  # chemsys_type -> list of (struct, fv)
-    for struct, fv in all_samples:
-        chemsys = get_chemsys_type(struct)  # e.g., "ABO3", "binary_oxide"
-        buckets.setdefault(chemsys, []).append((struct, fv))
-
-    for chemsys, bucket in buckets.items():
-        # 桶内按主维度排序
-        bucket.sort(key=lambda x: x[1][main_dim])
-
-        for i in range(len(bucket)):
-            for j in range(i + 1, len(bucket)):
-                si, fvi = bucket[i]
-                sj, fvj = bucket[j]
-
-                # 硬匹配：原子数差 ≤20%
-                n_i, n_j = len(si), len(sj)
-                if abs(n_i - n_j) / max(n_i, n_j) > 0.2:
-                    continue
-
-                # 主维度差异要足够大
-                main_diff = abs(fvi[main_dim] - fvj[main_dim])
-                if main_diff < threshold_main:
-                    continue
-
-                # 其他维度差异要足够小
-                other_similarity = 1.0 - np.mean([
-                    abs(fvi[d] - fvj[d]) for d in other_dims
-                ])
-                if any(abs(fvi[d] - fvj[d]) > threshold_other
-                       for d in other_dims):
-                    continue
-
-                # 结构匹配度
-                struct_match = compute_structure_match_score(si, sj)
-
-                # Label confidence（取两者 calibration tier 中较低的）
-                tier_i = fvi.get("calibration_tier", 4)
-                tier_j = fvj.get("calibration_tier", 4)
-                tier_weight = {1: 1.0, 2: 0.8, 3: 0.5, 4: 0.2}
-                label_conf = min(tier_weight[tier_i], tier_weight[tier_j])
-
-                # pair_quality 综合评分
-                pair_quality = (
-                    main_diff * other_similarity *
-                    struct_match * label_conf
-                )
-
-                if pair_quality < min_pair_quality:
-                    continue
-
-                # Winner = 主维度分数更低的那个
-                if fvi[main_dim] < fvj[main_dim]:
-                    winner, loser = si, sj
-                    w_fv, l_fv = fvi, fvj
-                else:
-                    winner, loser = sj, si
-                    w_fv, l_fv = fvj, fvi
-
-                pairs.append({
-                    "winner": winner, "loser": loser,
-                    "w_fv": w_fv, "l_fv": l_fv,
-                    "pair_quality": pair_quality,
-                    "label_confidence": label_conf,
-                    "main_axis_gap": main_diff,
-                    "axis": dim
-                })
-
-                if len(pairs) >= max_pairs:
-                    return pairs
-
-    return pairs
-```
-
-<aside>
-⚡
-
-**配对效率优化**：按化学体系分桶后桶内搜索，复杂度从 $O(n^2)$ 降至 $O(\sum_k n_k^2)$，其中 $n_k$ 为各桶大小。进一步优化：桶内按主维度排序后做双指针扫描。
-
-</aside>
-
-### 3.2 为什么比 weighted-sum / 纯 score-aligned 更好
-
-1. **因果推断视角**：matched pairing 控制混杂变量（化学体系、原子数），使 main axis gap 成为近似的"处理效应"
-2. **可独立消融**：删除 F1-aligned pairs → 观察 F1 指标下降（实验 #8 核心消融）
-3. **避免超参**：不需要调 $\alpha_1, \alpha_2, \alpha_3$ 权重
-4. **pair_quality 过滤**：低质量 pair 自动被排除，提高训练信号纯度
-5. **label_confidence 传递**：calibration tier 信息从 Paper 1 流入 Paper 2，实现端到端的不确定性感知
-6. **审稿人友好**：每个维度的贡献可单独可视化
+**多维失败信息应尽可能晚地聚合。** 在训练信号构造层面保留维度解耦信息，让模型分别学习改善各类失败，而不是学习优化一个混合分数。
 
 ---
 
-## Step 4：Confidence-Weighted Margin DPO 训练（FIIR-v2 核心升级）
+## 三、方法论核心组件
 
-### 4.1 CW-Margin DPO 损失函数（替代标准 DPO）
+### 3.1 Pre-filtering：移除低级错误
 
-<aside>
-🔴
+**原则**：明显非法结构（原子重叠、晶格角异常、密度异常等）在偏好对构造前直接过滤，不参与偏好学习。
 
-**FIIR-v2 核心升级**：从标准 DPO 升级为 **Confidence-Weighted Margin DPO**。两个关键改进：① pair confidence $w_{ij}$ 由 calibration tier 决定（可靠的 pair 权重更高）；② adaptive margin $m_{ij}$ 由 failure gap 决定（near-miss 用小 margin，catastrophic 用大 margin）。借鉴 MADPO [35]、γ-PO [36]、CW-PO [37]。
+**方法论理由**：
 
-</aside>
+- 这些结构已被 F1 规则检测以高置信度标记
+- 把它们放进偏好对是浪费模型容量学习低级错误
+- 模型应该把学习能力集中在 near-miss 区域（"几乎成功但差一点"的结构）
 
-$$
-\mathcal{L} = -\sum_i w_{ij} \log \sigma\left(\beta \left[\log \frac{\pi_\theta(x_w^i)}{\pi_{\text{ref}}(x_w^i)} - \log \frac{\pi_\theta(x_l^i)}{\pi_{\text{ref}}(x_l^i)}\right] - m_{ij}\right)
-$$
+### 3.2 Matched Axis-Aligned Pairing：因果控制的偏好对
 
-```python
-import torch
-import torch.nn.functional as F
+这是 FSAL 与 PLaID++ [25] 的核心方法论差异。
 
-def cw_margin_dpo_loss(
-    policy_chosen_logps: torch.Tensor,
-    policy_rejected_logps: torch.Tensor,
-    reference_chosen_logps: torch.Tensor,
-    reference_rejected_logps: torch.Tensor,
-    pair_weights: torch.Tensor,   # w_ij: pair confidence
-    margins: torch.Tensor,         # m_ij: adaptive margin
-    beta: float = 0.1
-) -> torch.Tensor:
-    """
-    Confidence-Weighted Margin DPO (FIIR-v2)。
-    借鉴 MADPO [35], γ-PO [36], CW-PO [37]。
+**问题**：普通 DPO 随机配对（或仅按分数排序配对）时，一个 pair 中的 chosen 和 rejected 可能同时在多个维度上不同（不同化学体系、不同结构类型）。模型从这样的 pair 中学到的信号是模糊的。
 
-    参数：
-        pair_weights: 由 calibration tier 决定的 pair confidence
-                      Tier1→1.0, Tier2→0.8, Tier3→0.5, Tier4→0.2
-        margins:      由 failure gap 决定的 adaptive margin
-                      near-miss→0.1, moderate→0.3, catastrophic→0.5
-    """
-    chosen_rewards = beta * (
-        policy_chosen_logps - reference_chosen_logps
-    )
-    rejected_rewards = beta * (
-        policy_rejected_logps - reference_rejected_logps
-    )
+**解决方案——Confounder-Controlled Preference Construction（v2.2 强化表述）**：
 
-    # CW-Margin DPO: weighted loss with adaptive margin
-    logits = chosen_rewards - rejected_rewards - margins
-    loss = -(pair_weights * F.logsigmoid(logits)).mean()
-    return loss
+- **硬匹配**：pair 中的两个样本必须属于同一化学体系类别（如都是 ABX₃ 型钙钛矿或二元氧化物）+ 原子数接近
+- **软加权**：晶系相似度、prototype 相似度纳入 pair quality 评分
+- **Axis-aligned**：每个 pair 只在一个失败维度上有显著差异，其他维度保持接近
+- **Pair coverage（v2.2 新增）**：pair 须覆盖主要 composition space 和 prototype space，不能集中在少数化学体系。覆盖度不足时加 coverage-aware reweighting
+- **目标**：使每个 pair 近似于"只改变一个失败维度的控制实验"
+- **与 MODPO/D2-DPO 的本质区别**：MODPO [32] / D2-DPO [50] 等 multi-objective DPO 仅按分数排序构造 pair，不控制混杂变量；FSAL 要求 composition/prototype 匹配后比较单一维度——本质是 **proximal causal inference**（类比 RCT vs 观察性研究）。Paper 2 必须设计直接消融：matched pairing vs unmatched per-objective DPO，量化匹配带来的增量
 
-def compute_pair_weight_and_margin(pair_info: dict) -> tuple:
-    """
-    从 pair 信息中计算 weight 和 margin。
-    """
-    # Weight: 由 label_confidence（calibration tier）决定
-    w = pair_info["label_confidence"]  # 已在 pair 构造时计算
+**Pair quality 综合评分**：
 
-    # Margin: 由 main_axis_gap 决定
-    gap = pair_info["main_axis_gap"]
-    if gap < 0.15:       # near-miss pair
-        m = 0.1
-    elif gap < 0.4:      # moderate pair
-        m = 0.3
-    else:                # catastrophic pair
-        m = 0.5
+- 主维度差异（越大越好）× 其他维度相似度（越高越好）× 结构匹配度 × 标签置信度
+- 低于阈值的 pair 不参与训练
 
-    return w, m
-```
+**因果论证的重要性**：
 
-**对比标准 DPO（实验 #15 消融用）**：
+- 类比 RCT（随机对照试验）：控制混杂变量后，观察到的差异才能归因于目标变量
+- 参考 Causal Preference Learning [39] 和 Causal DPO [40] 的因果视角
+- 这不仅是工程技巧，而是方法论层面的严谨性
 
-```python
-def standard_dpo_loss(
-    policy_chosen_logps, policy_rejected_logps,
-    reference_chosen_logps, reference_rejected_logps,
-    beta: float = 0.1
-) -> torch.Tensor:
-    """标准 DPO (Rafailov et al., NeurIPS 2023) [14]，用于消融对比"""
-    chosen_rewards = beta * (policy_chosen_logps - reference_chosen_logps)
-    rejected_rewards = beta * (policy_rejected_logps - reference_rejected_logps)
-    return -F.logsigmoid(chosen_rewards - rejected_rewards).mean()
-```
+### 3.3 Confidence-Weighted Margin DPO
 
-### 4.2 训练循环（CW-Margin DPO + axis-aligned batch 采样）
+标准 DPO [14] 对所有 pair 使用相同的 margin 和权重。FSAL 引入两个维度的信号感知：
 
-```python
-def train_structured_dpo_v2(
-    model, ref_model, preference_data,
-    epochs=3, batch_size=32, lr=1e-5, beta=0.1
-):
-    """FSAL-v2 结构化 CW-Margin DPO 训练"""
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+**1. Pair Confidence** $w_{ij}$
 
-    for epoch in range(epochs):
-        batch = sample_balanced_batch(
-            preference_data,
-            batch_size=batch_size,
-            ratios={"f1": 0.3, "f2": 0.3, "f3": 0.3, "mixed": 0.1}
-        )
+- 由 Calibration Tier 决定：Tier 1/2 pair 权重高，Tier 3/4 pair 权重低或剔除
+- **Chemistry-aware confidence discount（v2.2 新增）**：MLIP ensemble disagreement 超过阈值的化学体系，F3 的 calibration tier 自动降一级，相应 pair weight 自动降低——防止 MLIP 系统偏差向生成模型传播
+- 方法论理由：不确定的标签不应与确定的标签有相同影响力
 
-        for pair_batch in batch:
-            winners = [p["winner"] for p in pair_batch]
-            losers = [p["loser"] for p in pair_batch]
+**2. Adaptive Margin** $m_{ij}$
 
-            # 计算 pair weights 和 margins
-            weights, margins = [], []
-            for p in pair_batch:
-                w, m = compute_pair_weight_and_margin(p)
-                weights.append(w)
-                margins.append(m)
-            pair_weights = torch.tensor(weights, device="cuda")
-            pair_margins = torch.tensor(margins, device="cuda")
+- 由 failure gap 决定：near-miss pair（failure 差异小）用小 margin，catastrophic pair（差异大）用大 margin
+- 方法论理由：near-miss 的偏好关系更微妙，需要更温和的学习信号；catastrophic 的偏好关系更明确
+- 借鉴 MADPO [35]（adaptive margin）、γ-PO [36]（dynamic target）、CW-PO [37]（confidence weighting）
 
-            with torch.no_grad():
-                ref_w_logps = ref_model.log_prob(winners)
-                ref_l_logps = ref_model.log_prob(losers)
+**核心公式形式**：
 
-            policy_w_logps = model.log_prob(winners)
-            policy_l_logps = model.log_prob(losers)
+CW-Margin DPO 的损失函数在标准 DPO 基础上引入 $w_{ij}$（pair confidence）和 $m_{ij}$（adaptive margin）两个调制项，使学习信号同时感知标签可靠性和失败程度差异。
 
-            loss = cw_margin_dpo_loss(
-                policy_w_logps, policy_l_logps,
-                ref_w_logps, ref_l_logps,
-                pair_weights=pair_weights,
-                margins=pair_margins,
-                beta=beta
-            )
+### 3.4 Reward Hacking 防护机制（新增）
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+**问题**：DPO 的 reward 来自 MLIP proxy（$E_{\text{hull}}$ 等），模型可能学会生成"骗过"MLIP 但物理上不合理的结构——即 reward hacking（Goodhart's Law [49]）。
 
-        # === 模式坍缩监控 ===
-        entropy = compute_composition_entropy(model, n_samples=1000)
-        print(f"Epoch {epoch}: loss={loss:.4f}, entropy={entropy:.4f}")
-        # 连续两轮熵下降 >10% 则降低学习率
-```
+**四层防护**：
 
-### 4.3 CrystalFormer 序列级 DPO 适配（关键实现细节）
+1. **DFT spot-check**：每轮 on-policy refresh 随机抽 5–10% 样本做 DFT 验证，监控 MLIP proxy 与 DFT 真值的偏差趋势
+2. **Conservative reward estimation**：取 MLIP ensemble 预测的下界（而非均值）作为 E_hull 估计，降低过度乐观风险
+3. **Proxy-true divergence 指标**：定义 $\Delta_{\text{proxy-true}} = |E_{\text{hull}}^{\text{MLIP}} - E_{\text{hull}}^{\text{DFT}}|$ 并按轮次追踪。若该指标持续上升，触发 early stopping 或增大 DFT spot-check 比例
+4. **Conformal prediction UQ**：参考 [42][44]，为 MLIP 预测提供 distribution-free 的覆盖率保证，替代 ensemble disagreement 的启发式不确定性
 
-<aside>
-🔑
+**方法论意义**：这是 FSAL 区别于 PLaID++ [25] 和 CrystalFormer-RL [1] 的重要防护层——它们均未显式处理 reward hacking 风险。
 
-CrystalFormer 的输出是自回归序列 $(G, \mathbf{L}, W_1, W_2, \ldots, W_n)$，其中 $G$ 为空间群 token、$\mathbf{L}$ 为晶格参数、$W_i$ 为 Wyckoff 位点。DPO 需要序列级 log probability，以下是具体适配方案。
+**v2.1 实施调整**：从"每轮随机抽 5–10%"改为更高效的分层审计策略：
 
-</aside>
+- **Fixed DFT audit set**：建立固定审计结构集（~50–100 结构），每轮训练后必检 MLIP proxy 与 DFT 的偏差变化
+- **Targeted audit**：主动抽查高风险样本——MLIP 预测很好 + novelty 很高 + uncertainty 很高 + 结构分布偏离训练集
+- **Proxy-true divergence 作为 early stopping 和模型选择标准**，而非仅训练后补充分析
+- 这比随机抽查更省计算，也更能捕捉 Goodhart / proxy hacking
 
-```python
-def compute_crystal_log_prob(model, crystal_tokens, length_normalize=True):
-    """
-    计算 CrystalFormer 对一个晶体序列的 log probability。
+### 3.5 Semi-On-Policy Pair Refresh（优化版）
 
-    Args:
-        model: CrystalFormer 模型
-        crystal_tokens: tokenize 后的晶体序列
-        length_normalize: 是否做长度归一化（推荐开启）
-    Returns:
-        序列级 log probability (标量)
-    """
-    log_probs = []
-    for t in range(1, len(crystal_tokens)):
-        logits = model(crystal_tokens[:t])
-        log_p = F.log_softmax(logits[-1], dim=-1)
-        log_probs.append(log_p[crystal_tokens[t]])
+**原则**：每轮迭代必须重新生成样本、重新计算 failure vector、重新构造 matched pair。
 
-    total_log_prob = torch.stack(log_probs).sum()
+**方法论理由**：
 
-    if length_normalize:
-        # 长度归一化：避免模型偏好生成短序列（少原子晶体）
-        total_log_prob = total_log_prob / len(log_probs)
+- 模型 M_k 改进后，其失败分布会发生变化（distribution shift）
+- 上一轮的 pair 不再代表当前模型的失败模式
+- Off-policy pair 会导致训练信号与当前模型不匹配，降低学习效率甚至引入偏差
+- 这类似于 online RL 中的 on-policy 要求
 
-    return total_log_prob
+**计算成本优化**（原方案约为 PLaID++ 的 10×）：
 
-def dpo_step_crystal(model, ref_model, winner_struct, loser_struct, beta=0.1):
-    """单步 Crystal DPO 更新"""
-    w_tokens = tokenize_crystal(winner_struct)
-    l_tokens = tokenize_crystal(loser_struct)
+- **Failure Predictor 快速预筛**：用 Paper 1 训练的轻量级 Failure Predictor 快速估计新生成样本的 failure vector，仅对预测 near-miss 的样本执行完整 MLIP 评估
+- **Semi-on-policy 策略**：80% cached pairs（上一轮）+ 20% 新生成 pairs，逐步过渡
 
-    # 变长序列：winner 和 loser 长度可不同，分别计算
-    pi_w = compute_crystal_log_prob(model, w_tokens)
-    pi_l = compute_crystal_log_prob(model, l_tokens)
+### 3.6 Near-miss 优先采样
 
-    with torch.no_grad():
-        ref_w = compute_crystal_log_prob(ref_model, w_tokens)
-        ref_l = compute_crystal_log_prob(ref_model, l_tokens)
+**原则**：$E_{\text{hull}}$ 在 0.1–0.2 eV/atom 范围的 near-miss 样本通常比 catastrophic failure 更有训练价值。
 
-    return dpo_loss(pi_w, pi_l, ref_w, ref_l, beta)
-```
+**方法论理由**：
 
-**关键注意事项**：
+- Near-miss 结构"几乎成功"，模型只需小幅调整即可改善
+- Catastrophic failure 信号太强，容易导致过度回避而牺牲多样性
+- 类比 curriculum learning：先学简单的区分，再学困难的
+- Near-miss 应在采样中占更大配额
 
-1. **变长序列处理**：不同晶体原子数不同，DPO 偏好对 $(x_w, x_l)$ 不要求等长——分别计算各自的 log probability 即可
-2. **长度归一化必须开启**：否则模型会退化为偏好生成小原子数晶体（短序列 log prob 绝对值更小）
-3. **参考模型冻结**：$\pi_{\text{ref}}$ 使用 `model.eval()` + `torch.no_grad()`，整个训练过程不更新
-4. **tokenization 一致性**：须与 CrystalFormer 原始代码保持一致（空间群编号 → token，晶格参数离散化，Wyckoff 位点编码），参考 `CrystalFormer/utils/tokenizer.py`
+### 3.7 Diversity Preservation
+
+**问题**：偏好学习可能导致模式坍缩（mode collapse）——模型学会只生成少数"安全"结构。
+
+**方法论解决**：
+
+- **Soft Preference Learning [31]**：解耦 entropy 项和 cross-entropy 项，使模型在提升质量的同时保持分布多样性
+- **组成熵监控**：持续追踪生成晶体的化学组成多样性
+- **训练数据混入**：适度混入原始训练数据，防止遗忘
+- **Pareto front 评估**：不只看 stability 一个指标，必须同时报告 stability-diversity Pareto front
+
+### 3.8 Pair Yield + Coverage 保障机制（v2.2 更新）
+
+**问题**：axis-aligned matching 的约束很严（固定其他维度、只变一个维度），实际能匹配到多少有效 pair、pair 能否覆盖足够的化学空间，均未验证。
+
+**解决方案**：
+
+1. **依赖 Paper 1 的 pair yield + coverage pilot study 结果**：确认各 failure axis 的 yield 和 pair 在 composition/prototype space 上的覆盖度
+2. **若 yield > 10% 且 coverage 充足**：使用严格匹配
+3. **若 yield < 10%**：启用 **soft matching + causal reweighting**（参考 Causal DPO [40]）：放宽匹配条件，用倾向性得分（propensity score）对混杂变量做事后校正
+4. **若 coverage 不足**（v2.2 新增）：pair 集中在少数化学体系/prototype → 加 **coverage-aware reweighting**，对低覆盖区域的 pair 提高采样权重
+5. **pair quality 综合评分下限**：即使启用 soft matching，pair quality 综合评分仍须高于最低阈值
+6. **最终后备（Plan B）**：yield + coverage 均不足 → 转向 objective-conditioned FSAL（适用于 crystal LLM 基座）
+
+### 3.9 MapReduce LoRA variant（实验变体）
+
+**概念**：每个失败维度各训独立 LoRA adapter，推理时合并。
+
+- 借鉴 MapReduce LoRA [29]（多偏好并行训练 + 合并）和 LoRI [41]（减少跨任务干扰）
+- 作为消融实验对比 batch-level mixing，而非主方法
 
 ---
 
-### 4.4 模式坍缩缓解策略
+## 四、Base-Model Agnostic 设计
 
-```python
-def sample_balanced_batch(preference_data, batch_size, ratios):
-    """
-    模式坍缩缓解：
-    1. 混入 50% 原始训练数据（SFT loss）
-    2. 按维度平衡采样偏好对
-    3. 组成熵监控
-    """
-    n_f1 = int(batch_size * ratios["f1"])
-    n_f2 = int(batch_size * ratios["f2"])
-    n_f3 = int(batch_size * ratios["f3"])
-    n_mixed = batch_size - n_f1 - n_f2 - n_f3
+### 原则（v2.2 降级为"可适配"）
 
-    batch = []
-    batch += sample_from(preference_data["f1_aligned"], n_f1, "f1")
-    batch += sample_from(preference_data["f2_aligned"], n_f2, "f2")
-    batch += sample_from(preference_data["f3_aligned"], n_f3, "f3")
-    batch += sample_from(preference_data["mixed"], n_mixed, "mixed")
+FSAL 不绑定特定生成模型架构，但 Paper 2 不以"全面 base-model agnostic"为生死线：
 
-    return batch
+1. **主实验基座（完整验证）**：CrystalFormer（自回归，token-based）——所有消融实验和 head-to-head 对比在此完成
+2. **Pilot 基座（概念验证）**：DiffCSP++ [20] 或 OMatG [4]——较小规模实验，证明方法思想可迁移，但不要求所有指标打穿
+3. **可选扩展**：WyckoffDiff [45]（Wyckoff-aware 扩散模型），若资源允许
 
-# KL 正则化
-def total_loss(dpo_loss, model, ref_model, kl_weight=0.01):
-    """DPO + KL 正则化"""
-    kl_div = compute_kl_divergence(model, ref_model)
-    return dpo_loss + kl_weight * kl_div
-```
+### 适配考量
+
+- **自回归基座**：偏好学习可直接基于 token-level log-probability，与 LLM DPO 同构
+- **扩散/Flow 基座（v2.2 更新——已知风险与应对）**：CrystalFormer 有 token-level log-prob，但 OMatG/DiffCSP++ 的 log-likelihood 需 ODE 积分，成本高且不稳定。FlowDPO [46] 实为 LLM 方法，非扩散模型 DPO。**应对方案**：扩散/flow pilot 使用 **denoising score matching loss** 作为 implicit log-prob proxy（类比 DiffusionDPO, Wallace et al. 2024），或用 **reward-weighted regression** 替代严格 DPO。Pilot 定位为概念验证，不要求所有指标打穿
+- 若 pilot 结果好，base-model agnostic 可升级为完整 claim；若不好，仍可作为"architecture-adaptable with promising pilot"报告
 
 ---
 
-## Step 5：Failure Predictor Reranking（推理时通道）
+## 五、与 PLaID++ 的 Head-to-Head 对比
 
-```python
-def failure_predictor_reranking(
-    model, failure_predictor,
-    n_generate=100, n_select=10
-):
-    """
-    双通道推理：
-    1. 训练时已通过 Structured DPO 改进分布
-    2. 推理时用 Failure Predictor 进一步过滤
-    """
-    # 生成 K 个候选
-    candidates = model.generate(n_generate)
+PLaID++ [25] 是最直接的竞品，也使用 iterative DPO 改进晶体生成。核心差异：
 
-    # Failure Predictor 打分（毫秒级）
-    scores = []
-    for struct in candidates:
-        pred = failure_predictor.predict(struct)
-        # 综合失败分数 = F1 + F2 + F3
-        total_score = pred["f1"] + pred["f2"] + pred["f3"]
-        scores.append(total_score)
+| 维度                    | PLaID++             | FSAL                                                                             |
+| ----------------------- | ------------------- | -------------------------------------------------------------------------------- |
+| **失败表示**            | Weighted-sum scalar | 五维 failure vector (F1–F5) + calibration tier                                   |
+| **偏好对构造**          | 按总分排序配对      | Matched axis-aligned pairing（因果控制）                                         |
+| **DPO 变体**            | 标准 DPO            | Confidence-Weighted Margin DPO                                                   |
+| **多样性保护**          | 未明确处理          | Soft Preference Learning [31] + 组成熵监控                                       |
+| **Reward hacking 防护** | 无                  | DFT spot-check + conservative reward + proxy-true divergence 监控 + conformal UQ |
+| **基座覆盖**            | 仅 crystal LLM      | 自回归 + 扩散/flow 双基座（可选 WyckoffDiff [45] 第三基座）                      |
 
-    # 选取失败分数最低的 Top-N
-    top_indices = np.argsort(scores)[:n_select]
-    return [candidates[i] for i in top_indices]
-```
+**这个 head-to-head 对比是 Paper 2 最关键的实验**——必须在相同训练集、相同基座、相同评测框架下严格对比。
 
 ---
 
-## Step 6：On-Policy 迭代闭环（FIIR-v2 核心升级）
+## 六、Claim-Based 消融矩阵
 
-<aside>
-🔴
-
-**FIIR-v2 核心升级**：每轮迭代 **on-policy 刷新**——重新生成样本 + 重新构造 matched pair + 重新计算 failure vector。防止 distribution shift（off-policy 的 pair 在新策略下可能已不再有效）。实验 #15 对比 on-policy vs off-policy。
-
-</aside>
-
-```python
-def fiir_v2_iterative_loop(
-    base_model, failure_predictor, mlip_calculators,
-    n_rounds=5, n_generate_per_round=10000
-):
-    """FIIR-v2 完整迭代训练循环（On-Policy Refresh）"""
-    model = base_model
-    ref_model = base_model.copy()  # 冻结参考模型
-
-    metrics_history = []
-
-    for round_idx in range(n_rounds):
-        print(f"\n=== Round {round_idx + 1}/{n_rounds} ===")
-
-        # 1. On-Policy 生成：用当前模型生成新候选
-        success, failure, pre_filtered = generate_and_label_v2(
-            model, n_generate_per_round, mlip_calculators
-        )
-        print(f"  Pre-filtered: {len(pre_filtered)}")
-
-        # 2. 分类失败样本
-        near_miss, moderate, catastrophic = categorize_failures(failure)
-
-        # 3. On-Policy 重新构造 Matched Axis-Aligned Pairs
-        pref_data = {
-            "f1_aligned": construct_matched_axis_aligned_pairs(
-                success, failure, dim=0),
-            "f2_aligned": construct_matched_axis_aligned_pairs(
-                success, failure, dim=1),
-            "f3_aligned": construct_matched_axis_aligned_pairs(
-                success, failure, dim=2),
-            "mixed": construct_mixed_pairs(success, failure)
-        }
-
-        # 4. CW-Margin DPO 训练
-        model = train_structured_dpo_v2(
-            model, ref_model, pref_data
-        )
-
-        # 5. 可选：更新 Failure Predictor
-        # failure_predictor.finetune(new_labels)
-
-        # 6. 记录指标
-        metrics = evaluate_model(model, n_samples=5000)
-        metrics_history.append(metrics)
-        print(f"  Stable Rate: {metrics['stable_rate']:.3f}")
-        print(f"  F1 Fail Rate: {metrics['f1_fail']:.3f}")
-        print(f"  F2 Fail Rate: {metrics['f2_fail']:.3f}")
-        print(f"  Composition Entropy: {metrics['entropy']:.3f}")
-        print(f"  Pair Quality (mean): {np.mean([p['pair_quality'] for pairs in pref_data.values() for p in pairs]):.3f}")
-
-        # 7. Early stopping：如果连续 2 轮 stable rate 提升 < 1% 则停止
-        if len(metrics_history) >= 2:
-            delta = metrics['stable_rate'] - metrics_history[-2]['stable_rate']
-            if delta < 0.01:
-                print(f"  ⚠️ Marginal improvement ({delta:.4f}), consider stopping.")
-
-    return model, metrics_history
-```
+| Claim                                                         | 消融对比                                                                                   | 预期结论                                                                           |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| **结构化反馈 > 二值/标量反馈**                                | FSAL vs Binary DPO / Energy-only PPO [1] / Rejection Sampling                              | FSAL 在所有维度上更优                                                              |
+| **Axis-aligned > weighted-sum**                               | FSAL vs Weighted-Sum DPO / PLaID++ 复现 [25]                                               | 维度解耦显著优于混合维度                                                           |
+| **Matched（confounder-controlled） > 无匹配（uncontrolled）** | Matched pairing vs unmatched per-objective DPO（MODPO/D2-DPO 风格）vs random negative      | confounder-controlled 配对显著优于 unmatched per-objective DPO，量化匹配带来的增量 |
+| **CW-Margin > 标准 DPO**                                      | CW-Margin DPO vs 标准 DPO（同样的 pair）                                                   | 置信度加权 + adaptive margin 更稳健                                                |
+| **Near-miss 有训练价值**                                      | Near-miss 为主 vs catastrophic 为主 vs 混合                                                | Near-miss 优先采样效率最高                                                         |
+| **训练时对齐 > 推理时引导**                                   | FSAL vs 推理时 Failure-Guided Sampling（路线 C）                                           | 训练时对齐的增量价值显著                                                           |
+| **On-policy > off-policy**                                    | Semi-on-policy refresh vs 固定 pair 不刷新 vs 全量 on-policy                               | Semi-on-policy 平衡效果与成本                                                      |
+| **Reward hacking 可缓解**                                     | 有 DFT spot-check + conservative reward vs 无防护；$\Delta_{\text{proxy-true}}$ 随轮次变化 | 有防护时 proxy-true divergence 保持稳定                                            |
+| **Base-model agnostic**                                       | CrystalFormer + DiffCSP++/OMatG 双基座；可选 WyckoffDiff [45] 第三基座                     | 两类（或三类）基座上均有效                                                         |
+| **质量不牺牲多样性**                                          | Stability-Diversity Pareto front 分析                                                      | FSAL 推进 Pareto front 而非单点                                                    |
+| **Repair 作为互补**                                           | FSAL alone vs FSAL + Repair（路线 B）                                                      | Repair 对 near-miss 有额外收益                                                     |
 
 ---
 
-## Step 7：核心消融实验
+## 七、评价框架
 
-| #       | 消融                                          | 具体做法                                            | 验证假设                                           |
-| ------- | --------------------------------------------- | --------------------------------------------------- | -------------------------------------------------- |
-| A1      | **维度消融**                                  | 分别删除 F1/F2/F3-aligned pairs                     | 各维度偏好对的独立贡献                             |
-| A2      | **负样本消融**                                | near-miss only vs catastrophic only vs random       | Near-miss 的学习价值                               |
-| A3      | **DPO vs PPO**                                | 同样多维信息，对比两种学习方式                      | Preference pair 天然支持多维对比                   |
-| A4      | **Multi-dim PPO vs FSAL**                     | F1+F2+F3 多维 reward 做 PPO                         | 即使给 PPO 相同多维信息，axis-aligned DPO 仍更优   |
-| A5      | **Axis-aligned vs Weighted-sum**              | 同样多维，对比偏好对构造方式                        | 解耦 > 压缩                                        |
-| A6      | **迭代轮数**                                  | 画收敛曲线                                          | 多轮有持续收益                                     |
-| A7      | **PLaID++ Head-to-Head**                      | 复现 PLaID++ [25] weighted-sum iterative DPO        | **核心 claim**：axis-aligned > weighted-sum        |
-| A8      | **MapReduce LoRA variant**                    | F1/F2/F3 各训 LoRA adapter，迭代合并 [29]           | Pareto front 推进 vs batch-level mixing            |
-| A9      | **推理时 Failure Guidance**                   | 冻结基座，推理时 Failure Predictor 引导             | 训练时对齐 > 推理时引导                            |
-| A10     | **Repair（路线 B）**                          | near-miss only 局部修复                             | 修复 vs 偏好学习效率对比                           |
-| A11     | **Soft Preference Learning**                  | DPO 中解耦 entropy/cross-entropy [31]               | stability ↑ 且 diversity 不坍缩                    |
-| **A12** | **CW-Margin DPO vs 普通 DPO（FIIR-v2 新增）** | 去掉 pair_weight 和 margin，用标准 DPO              | **CW-Margin > 标准 DPO（核心消融）**               |
-| **A13** | **Matched vs 无匹配 pairing（FIIR-v2 新增）** | 去掉化学体系硬匹配 + 结构软加权，仅用 score-aligned | **Matched pairing > 纯 score-aligned（核心消融）** |
-| **A14** | **多基座验证（FIIR-v2 新增）**                | FSAL-v2 on DiffCSP++ 或 OMatG                       | **Base-model agnostic（vs PLaID++ 差异化）**       |
-| **A15** | **On-Policy vs Off-Policy（FIIR-v2 新增）**   | 固定第 1 轮 pair 不刷新 vs 每轮 on-policy 刷新      | **On-policy refresh 防止 distribution shift**      |
+### 必须报告的指标
 
----
+- **质量**：Stable Rate / SUN Rate（↑）；各维度失败率 F1–F5（↓）
+- **多样性**：Unique / Novel / 空间群覆盖 / 组成熵（→ 不坍缩）
+- **标准评测**：LeMat-GenBench [18] leaderboard 上的完整报告
+- **Pareto 分析**：stable rate vs novelty/diversity Pareto front
+- **泄漏控制**：StructureMatcher 去重 + F4 定量泄漏评估
+- **Reward hacking 监控**：$\Delta_{\text{proxy-true}}$ 随训练轮次变化曲线
+- **Per-dimension 改善**：分别报告 F1–F5 的改善幅度，而非只报告总分
 
-## Step 8：必须正面回答的审稿问题
+### 对比方法
 
-<aside>
-⚠️
-
-**Q1: 为什么 axis-aligned 比 weighted scalar 更好？**
-→ 消融实验 #4 + 各维度独立改善可视化图
-
-**Q2: 为什么 near-miss 比 catastrophic 更有学习价值？**
-→ 消融实验 #2 + 梯度 norm 分析（near-miss 的梯度更大且方向更稳定）
-
-**Q3: 为什么 DPO 比 PPO 更适合多维信号？**
-→ 消融实验 #3。关键论证：preference pair 天然支持维度解耦的对比，PPO 必须将多维压成单一 reward
-
-</aside>
+1. **Base model**（无任何对齐）
+2. **Rejection Sampling**（生成后按 $E_{\text{hull}}$ 筛选）
+3. **CrystalFormer-RL [1]**（MLIP PPO）
+4. **PLaID++ [25]**（weighted-sum iterative DPO）——需要在我们的基座上复现
+5. **OMatG-IRL [26]**（推理时 RL）
+6. **推理时 Failure Guidance**（路线 C baseline）
+7. **FSAL**（我们的方法）
 
 ---
 
-## 论文写作要点
+## 八、论文写作定位
 
-### 标题
+### 目标 Venue
 
-> _"FSAL: Failure-Structured Alignment Learning for Crystal Generative Models"_
+NeurIPS / ICML
 
-### 核心卖点（严格 3 个，其他降级到附录）
+### 核心卖点
 
-1. **Failure Attribution Space**：首次将晶体生成失败从 binary/scalar 扩展为 3 维连续空间
-2. **Axis-Aligned Preference Construction**：维度解耦的偏好对比加权标量更精确
-3. **Near-miss Mining + Dual-Channel**：近失优先 + 训练/推理双通道
+1. **首个将结构化失败归因引入晶体生成对齐的方法**：不只用 scalar reward 做 DPO，而是用五维解耦的失败信号
+2. **因果控制的偏好对构造**：借鉴因果推理 [39][40] 的控制变量思想，使每个 pair 信号更纯净
+3. **Confidence-Weighted Margin DPO**：结合标签置信度和失败幅度的自适应偏好学习
+4. **Reward Hacking 显式防护**：首个在晶体生成偏好学习中引入 proxy-true divergence 监控和 DFT spot-check 的方法
+5. **Base-model agnostic**：在自回归和扩散/flow 基座上均验证（可选 WyckoffDiff 第三基座）
+6. **严格 head-to-head PLaID++ 对比**：在相同条件下证明结构化失败信号的价值
+7. **Chemistry-aware confidence discount**：MLIP 高偏差体系自动降低标签置信度，全链路防止系统偏差传播
+8. **已知方法论风险显式建档**：五大风险（pair 泛化性、counterfactual 可行性、MODPO 边界、扩散 DPO 适配、MLIP 偏差）均有明确预案
 
-### 与 PLaID++ [25] 的差异化
+### 关键叙事
 
-> PLaID++ (Xu et al., ICML 2026) [25] 是最直接的先行工作——也对晶体 LLM 做 iterative DPO。三个核心区别：
-> **(1)** PLaID++ 将 stability + novelty + space group 混为 weighted-sum 标量 reward，我们用 axis-aligned 偏好对实现维度解耦——消融实验 #5 和 #PLaID++ Head-to-Head 直接验证
-> **(2)** PLaID++ 的负样本是随机不稳定结构，我们的 near-miss mining（$E_{\text{hull}}$ 0.1–0.2 eV/atom）提供更高信息密度
-> **(3)** PLaID++ 用 temperature scaling 对抗 mode collapse，我们用 Soft Preference Learning [31] 从理论上解耦 entropy 与 cross-entropy，提供更精细的多样性控制
-> **(4)** 我们额外提供 Failure Predictor 推理时 reranking + Failure-Conditioned Repair（路线 B）两个互补通道
+> 现有晶体生成模型的对齐方法将多维失败信息压缩为单一标量——这就像医生只告诉病人"你不健康"而不说明是心脏问题还是肺部问题。FSAL 是第一个保留诊断信息的对齐方法：它告诉模型不仅"这个结构不好"，还告诉它"在哪个维度上不好、有多不好、这个判断有多可靠"，同时显式监控模型是否在"骗过"代理评估器。
 
-### 预期成果
+### 论文结构建议
 
-- Stable Rate 相比 CrystalFormer-RL [1] 和 PLaID++ [25] 提升 ≥15%（相对），**且 diversity 指标不下降**
-- **预期排序**：FSAL + Soft PL > FSAL > MapReduce LoRA variant > Multi-dim PPO > Weighted-sum DPO (≈PLaID++) > 推理时 Failure Guidance > Binary DPO > Energy-only PPO
-- **Pareto front 目标**：在 stability-diversity 平面上，FSAL 的 Pareto front 严格支配 PLaID++ 和 CrystalFormer-RL
-- 3–5 轮迭代有持续收益
-- **数据泄漏防控**：所有生成结构须通过 `StructureMatcher` 与训练集去重，确保 novelty 指标可信
+1. Introduction：为什么 scalar reward 不够？
+2. Background：DPO + 晶体生成
+3. FSAL Method（Pre-filtering → Matched Pairing → CW-Margin DPO → Reward Hacking Guard → Semi-On-Policy Refresh → Diversity Preservation）
+4. Base-Model Adaptation（自回归 vs 扩散/flow vs 可选 WyckoffDiff）
+5. Experiments（Head-to-head PLaID++ + 完整消融矩阵 + Reward Hacking 分析）
+6. Analysis（per-dimension 改善 + Pareto front + failure pattern shift + proxy-true divergence 曲线）
 
----
+### 参考文献
 
-## 参考文献（本页引用）
-
-- [1] Cao & Wang, "CrystalFormer-RL: Reinforcement Fine-Tuning for Materials Design", arXiv:2504.02367, 2025. https://arxiv.org/abs/2504.02367
-- [2] Zeni et al., "MatterGen: A generative model for inorganic materials design", _Nature_, 2025. https://www.nature.com/articles/s41586-025-08628-5
-- [3] "Continued challenges in high-throughput materials predictions: MatterGen predicts compounds from the training dataset", _Materials Horizons_, 2026. https://pubs.rsc.org/en/content/articlehtml/2026/mh/d6mh00268d
-- [4] Höllmer et al., "Open Materials Generation with Stochastic Interpolants", ICML 2025. https://arxiv.org/abs/2502.02582
-- [14] Rafailov et al., "Direct Preference Optimization: Your Language Model is Secretly a Reward Model", NeurIPS 2023. https://arxiv.org/abs/2305.18290
-- [18] Betala et al., "LeMat-GenBench: A Unified Evaluation Framework for Crystal Generative Models", AI4Mat-NeurIPS 2025 Workshop. https://arxiv.org/abs/2512.04562
-- [20] Jiao et al., "Space Group Constrained Crystal Generation (DiffCSP++)", ICLR 2024. https://arxiv.org/abs/2402.03992
-- [25] Xu et al., "PLaID++: A Preference Aligned Language Model for Targeted Inorganic Materials Design", ICML 2026. https://arxiv.org/abs/2509.07150
-- [29] Chen et al., "MapReduce LoRA: Advancing the Pareto Front in Multi-Preference Optimization", CVPR 2026 Highlight. https://arxiv.org/abs/2511.20629
-- [31] Slocum et al., "Diverse Preference Learning for Capabilities and Alignment (Soft Preference Learning)", NeurIPS 2025. https://arxiv.org/abs/2511.08594
-- [35] Rho, "Margin Adaptive DPO (MADPO)", TMLR. https://arxiv.org/abs/2510.05342
-- [36] Sun et al., "γ-PO: Robust Preference Optimization via Dynamic Target Margins", ACL 2025. https://aclanthology.org/2025.findings-acl.282/
-- [37] Afzali et al., "CW-PO: Confidence-Weighted Preference Optimization", ICLR 2026. https://arxiv.org/abs/2603.04968
-- [38] Wu et al., "AlphaDPO: Adaptive Reward Margin", ICML 2025. https://arxiv.org/abs/2410.10148
-
----
-
-## 给 Codex 的实现指导
-
-Codex 根据本页面搭建代码时，不要直接实现完整训练。先建立以下最小接口：
-
-- `PreferencePair`
-- `PreferenceDataset`
-- `AxisAlignedPairMiner`
-- `MatchedPairConfig`
-- `DPOLoss`
-- `FSALTrainer`
-- `GeneratorWrapper`
-
-FSAL 的最小闭环是：
-
-1. 输入带有 failure vector 的候选晶体集合；
-2. 构造 F1/F2/F3 axis-aligned preference pairs；
-3. 生成标准 preference dataset；
-4. 调用 FSAL trainer 接口；
-5. 输出训练日志和评估结果占位对象。
-
-实现时必须保留以下实验扩展点：
-
-- binary DPO baseline；
-- weighted-sum DPO baseline；
-- random negative baseline；
-- near-miss mining；
-- confidence-weighted margin DPO；
-- per-axis adapter bank。
+[1] CrystalFormer-RL, [3] MatterGen leakage, [4] OMatG, [14] DPO, [18] LeMat-GenBench, [20] DiffCSP++, [25] PLaID++, [26] OMatG-IRL, [27] DAO, [28] Self-Correcting Search, [29] MapReduce LoRA, [31] Soft Preference Learning, [32] MODPO, [35] MADPO, [36] γ-PO, [37] CW-PO, [38] AlphaDPO, [39] Causal Preference Learning, [40] Causal DPO, [41] LoRI, [42] MLIP uncertainty calibration, [44] Conformal Prediction, [45] WyckoffDiff, [46] FlowDPO, [47] PackFlow, [49] Reward Hacking Survey, [50] D2-DPO
