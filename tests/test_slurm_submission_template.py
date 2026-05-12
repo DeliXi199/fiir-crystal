@@ -74,6 +74,10 @@ def test_crystalformer_gpu_submitter_uses_unified_gpu_policy() -> None:
     assert "FIIR_GPU_PARTITIONS" in text
     assert "gpu4090_8" in text
     assert "FIIR_GPU_ACCELERATOR" in text
+    assert "FIIR_GPU_PRECISION_PROFILE" in text
+    assert "FIIR_MACE_RELAX" in text
+    assert "fp64" in text
+    assert "--precision-profile" in text
     assert "FIIR_SLURM_ACCOUNT" in text
     assert "hmt03" in text
     assert "FIIR_CONDA_ENV" in text
@@ -103,6 +107,7 @@ def test_unified_slurm_planner_cli_exists() -> None:
     assert "choices=(\"cpu\", \"gpu\")" in text
     assert "CpuSchedulingConfig" in text
     assert "GpuSchedulingConfig" in text
+    assert "--precision-profile" in text
     assert "--shell-vars" in text
     assert "--run-sbatch" in text
 

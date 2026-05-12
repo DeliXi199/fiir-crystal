@@ -1,15 +1,15 @@
 """SLURM GPU node selection policy.
 
 The policy is intentionally standard-library only. It inspects local SLURM
-state, ranks nodes by currently available GPU TF32 compute capacity, and
-returns a deterministic sbatch plan without submitting work unless a caller
-explicitly does so. CPU and memory constraints are used as eligibility filters
-and request sizing, not as default ranking signals.
+state, chooses a GPU ranking profile for the task precision, and returns a
+deterministic sbatch plan without submitting work unless a caller explicitly
+does so. CPU and memory constraints are used as eligibility filters and request
+sizing, not as default ranking signals.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import re
 import shlex
 import subprocess
@@ -31,6 +31,27 @@ TF32_GPU_WEIGHTS: dict[str, int] = {
     "intel80g": 40,
 }
 
+FP64_GPU_WEIGHTS: dict[str, int] = {
+    # Relative double-precision scheduling weights, normalized around
+    # RTX 4090 = 100. These are intentionally approximate queue-placement
+    # weights; callers can override them with --gpu-weight when cluster-local
+    # benchmark data is available.
+    "h200": 2600,
+    "h800": 2300,
+    "h20": 700,
+    "rtx4090": 100,
+    "generic": 80,
+    "amd80g": 1000,
+    "amd40g": 600,
+    "intel80g": 500,
+}
+
+GPU_WEIGHT_PROFILES: dict[str, dict[str, int]] = {
+    "tf32": TF32_GPU_WEIGHTS,
+    "fp64": FP64_GPU_WEIGHTS,
+}
+
+DEFAULT_GPU_PRECISION_PROFILE = "tf32"
 DEFAULT_GPU_WEIGHTS: dict[str, int] = dict(TF32_GPU_WEIGHTS)
 
 CUDA_PARTITION_HINTS = ("h200", "h20", "h800", "gpu4090", "test")
@@ -108,13 +129,22 @@ class GpuSchedulingConfig:
     """Configuration for selecting a GPU node."""
 
     accelerator: str = "cuda"
+    precision_profile: str = DEFAULT_GPU_PRECISION_PROFILE
     allowed_partitions: tuple[str, ...] = ()
     min_gpus: int = 1
     min_cpus: int = 1
     min_memory_mb: int = 0
     layout: str = "single-task"
     exclusive_when_full_node: bool = True
-    gpu_weights: Mapping[str, int] = field(default_factory=lambda: dict(DEFAULT_GPU_WEIGHTS))
+    gpu_weights: Mapping[str, int] | None = None
+
+    def __post_init__(self) -> None:
+        profile = normalize_precision_profile(self.precision_profile)
+        object.__setattr__(self, "precision_profile", profile)
+        if self.gpu_weights is None:
+            object.__setattr__(self, "gpu_weights", gpu_weights_for_profile(profile))
+        else:
+            object.__setattr__(self, "gpu_weights", dict(self.gpu_weights))
 
 
 @dataclass(frozen=True)
@@ -309,7 +339,7 @@ def select_best_gpu_node(
         node=node,
         partition=partition,
         score=score,
-        reason="highest_tf32_gpu_compute_capacity",
+        reason=f"highest_{config.precision_profile}_gpu_compute_capacity",
         candidates=candidates,
     )
 
@@ -343,7 +373,8 @@ def node_is_cuda_compatible(node: GpuNode) -> bool:
 
 
 def score_node(node: GpuNode, config: GpuSchedulingConfig) -> float:
-    gpu_weight = config.gpu_weights.get(node.gpu_model_key, config.gpu_weights.get("generic", 80))
+    weights = effective_gpu_weights(config)
+    gpu_weight = weights.get(node.gpu_model_key, weights.get("generic", 80))
     return node.free_gpus * gpu_weight * 1_000_000
 
 
@@ -463,13 +494,14 @@ def plan_gpu_job(
 def config_to_dict(config: GpuSchedulingConfig) -> dict[str, Any]:
     return {
         "accelerator": config.accelerator,
+        "precision_profile": config.precision_profile,
         "allowed_partitions": list(config.allowed_partitions),
         "min_gpus": config.min_gpus,
         "min_cpus": config.min_cpus,
         "min_memory_mb": config.min_memory_mb,
         "layout": config.layout,
         "exclusive_when_full_node": config.exclusive_when_full_node,
-        "gpu_weights": dict(config.gpu_weights),
+        "gpu_weights": effective_gpu_weights(config),
     }
 
 
@@ -546,8 +578,28 @@ def parse_partition_list(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(partitions)
 
 
-def parse_gpu_weights(values: Iterable[str]) -> dict[str, int]:
-    weights = dict(DEFAULT_GPU_WEIGHTS)
+def normalize_precision_profile(value: str) -> str:
+    profile = value.strip().lower()
+    if profile not in GPU_WEIGHT_PROFILES:
+        options = ", ".join(sorted(GPU_WEIGHT_PROFILES))
+        raise ValueError(f"unknown GPU precision profile {value!r}; choose one of: {options}")
+    return profile
+
+
+def gpu_weights_for_profile(profile: str) -> dict[str, int]:
+    return dict(GPU_WEIGHT_PROFILES[normalize_precision_profile(profile)])
+
+
+def effective_gpu_weights(config: GpuSchedulingConfig) -> dict[str, int]:
+    return dict(config.gpu_weights or gpu_weights_for_profile(config.precision_profile))
+
+
+def parse_gpu_weights(
+    values: Iterable[str],
+    *,
+    precision_profile: str = DEFAULT_GPU_PRECISION_PROFILE,
+) -> dict[str, int]:
+    weights = gpu_weights_for_profile(precision_profile)
     for value in values:
         if "=" not in value:
             raise ValueError(f"GPU weight must be name=value: {value}")

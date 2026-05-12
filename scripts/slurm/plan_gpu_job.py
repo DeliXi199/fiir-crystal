@@ -20,6 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from fiir_crystal.io import write_json
 from fiir_crystal.slurm_scheduling import (
+    GPU_WEIGHT_PROFILES,
     GpuSchedulingConfig,
     discover_gpu_nodes,
     parse_gpu_weights,
@@ -48,6 +49,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="single-task",
         help="single-task requests all free CPUs in one task; one-task-per-gpu starts one task per free GPU.",
     )
+    parser.add_argument(
+        "--precision-profile",
+        choices=tuple(sorted(GPU_WEIGHT_PROFILES)),
+        default="tf32",
+        help="GPU ranking profile for the task precision.",
+    )
     parser.add_argument("--gpu-weight", action="append", default=[], help="Override a GPU weight as name=value.")
     parser.add_argument("--job-name", default="fiir-gpu-job")
     parser.add_argument("--account")
@@ -74,12 +81,13 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     nodes = _load_nodes(args)
     config = GpuSchedulingConfig(
         accelerator=args.accelerator,
+        precision_profile=args.precision_profile,
         allowed_partitions=parse_partition_list(args.partition),
         min_gpus=args.min_gpus,
         min_cpus=args.min_cpus,
         min_memory_mb=args.min_memory_mb,
         layout=args.layout,
-        gpu_weights=parse_gpu_weights(args.gpu_weight),
+        gpu_weights=parse_gpu_weights(args.gpu_weight, precision_profile=args.precision_profile),
     )
     plan = plan_gpu_job(
         nodes,
@@ -130,6 +138,7 @@ def _print_summary(plan: dict[str, Any], output_json: str | None) -> None:
     print(f"  selected_node: {node['name']}")
     print(f"  selected_partition: {selected['selected_partition']}")
     print(f"  gpu_model: {node['gpu_model_key']}")
+    print(f"  precision_profile: {plan['config']['precision_profile']}")
     print(f"  requested_gpus: {request['gpus']}")
     print(f"  requested_cpus: {request['cpus']}")
     print(f"  requested_gres: {request['gres']}")

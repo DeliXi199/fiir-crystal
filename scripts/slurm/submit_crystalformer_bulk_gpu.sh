@@ -15,6 +15,13 @@ FIIR_GPU_MIN_GPUS="${FIIR_GPU_MIN_GPUS:-1}"
 FIIR_GPU_MIN_CPUS="${FIIR_GPU_MIN_CPUS:-1}"
 FIIR_GPU_MIN_MEMORY_MB="${FIIR_GPU_MIN_MEMORY_MB:-0}"
 FIIR_GPU_LAYOUT="${FIIR_GPU_LAYOUT:-single-task}"
+if [[ -z "${FIIR_GPU_PRECISION_PROFILE+x}" ]]; then
+  if [[ "${FIIR_MACE_RELAX:-0}" == "1" || "${FIIR_MACE_RELAX:-0}" == "true" ]]; then
+    FIIR_GPU_PRECISION_PROFILE="fp64"
+  else
+    FIIR_GPU_PRECISION_PROFILE="tf32"
+  fi
+fi
 FIIR_SLURM_ACCOUNT="${FIIR_SLURM_ACCOUNT:-hmt03}"
 FIIR_JOB_NAME="${FIIR_JOB_NAME:-fiir-cf-gpu}"
 FIIR_TIME_LIMIT="${FIIR_TIME_LIMIT:-}"
@@ -67,6 +74,8 @@ planner_args=(
   "$FIIR_GPU_MIN_MEMORY_MB"
   "--layout"
   "$FIIR_GPU_LAYOUT"
+  "--precision-profile"
+  "$FIIR_GPU_PRECISION_PROFILE"
   "--job-name"
   "$FIIR_JOB_NAME"
   "--log-dir"
@@ -103,6 +112,7 @@ echo "  min_gpus=${FIIR_GPU_MIN_GPUS}"
 echo "  min_cpus=${FIIR_GPU_MIN_CPUS}"
 echo "  min_memory_mb=${FIIR_GPU_MIN_MEMORY_MB}"
 echo "  layout=${FIIR_GPU_LAYOUT}"
+echo "  precision_profile=${FIIR_GPU_PRECISION_PROFILE}"
 echo "  slurm_account=${FIIR_SLURM_ACCOUNT:-none}"
 echo "  conda_env=${FIIR_CONDA_ENV}"
 echo "  require_jax_gpu=${FIIR_REQUIRE_JAX_GPU}"

@@ -5,8 +5,10 @@ from pathlib import Path
 
 from fiir_crystal.slurm_gpu_policy import (
     DEFAULT_GPU_WEIGHTS,
+    FP64_GPU_WEIGHTS,
     GpuSchedulingConfig,
     build_sbatch_plan,
+    parse_gpu_weights,
     parse_scontrol_nodes,
     plan_gpu_job,
     score_node,
@@ -91,6 +93,48 @@ def test_gpu_score_uses_only_available_gpu_count_times_tf32_weight() -> None:
     assert score_node(node, GpuSchedulingConfig()) == (
         node.free_gpus * DEFAULT_GPU_WEIGHTS[node.gpu_model_key] * 1_000_000
     )
+
+
+def test_fp64_profile_can_choose_fewer_stronger_double_precision_gpus() -> None:
+    text = """
+NodeName=gpu40902 Arch=x86_64 CoresPerSocket=16
+   CPUAlloc=0 CPUEfctv=32 CPUTot=32 CPULoad=0.02
+   Gres=gpu:rtx4090:8
+   State=IDLE ThreadsPerCore=1
+   Partitions=gpu4090_8
+   RealMemory=500000 AllocMem=0 FreeMem=494715
+   CfgTRES=cpu=32,mem=500000M,billing=32,gres/gpu=8
+   AllocTRES=
+
+NodeName=gpuh2002 Arch=x86_64 CoresPerSocket=48
+   CPUAlloc=160 CPUEfctv=192 CPUTot=192 CPULoad=8.00
+   Gres=gpu:8
+   State=MIXED ThreadsPerCore=2
+   Partitions=h200
+   RealMemory=2000000 AllocMem=0 FreeMem=1500000
+   CfgTRES=cpu=192,mem=2000000M,billing=192,gres/gpu=8
+   AllocTRES=cpu=160,gres/gpu=7
+"""
+    nodes = parse_scontrol_nodes(text)
+
+    tf32_selection = select_best_gpu_node(nodes, GpuSchedulingConfig(precision_profile="tf32"))
+    fp64_selection = select_best_gpu_node(nodes, GpuSchedulingConfig(precision_profile="fp64"))
+
+    assert tf32_selection is not None
+    assert fp64_selection is not None
+    assert tf32_selection.node.name == "gpu40902"
+    assert tf32_selection.score == 8 * DEFAULT_GPU_WEIGHTS["rtx4090"] * 1_000_000
+    assert tf32_selection.reason == "highest_tf32_gpu_compute_capacity"
+    assert fp64_selection.node.name == "gpuh2002"
+    assert fp64_selection.score == 1 * FP64_GPU_WEIGHTS["h200"] * 1_000_000
+    assert fp64_selection.reason == "highest_fp64_gpu_compute_capacity"
+
+
+def test_gpu_weight_overrides_apply_after_precision_profile() -> None:
+    weights = parse_gpu_weights(["rtx4090=5000"], precision_profile="fp64")
+
+    assert weights["h200"] == FP64_GPU_WEIGHTS["h200"]
+    assert weights["rtx4090"] == 5000
 
 
 def test_cpu_and_memory_do_not_change_default_gpu_ranking() -> None:
@@ -198,6 +242,7 @@ def test_plan_gpu_job_cli_writes_json_from_fixture(tmp_path: Path) -> None:
     saved = json.loads(output_json.read_text(encoding="utf-8"))
     assert saved == plan
     assert saved["ready"] is True
+    assert saved["config"]["precision_profile"] == "tf32"
     assert saved["selection"]["selected_node"]["name"] == "gpu40902"
     assert saved["sbatch"]["request"]["gpus"] == 8
     assert saved["sbatch"]["request"]["cpus"] == 32

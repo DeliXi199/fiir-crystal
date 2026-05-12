@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from fiir_crystal.io import write_json
 from fiir_crystal.slurm_scheduling import (
     CPU_PARTITION_ORDER_DEFAULT,
+    GPU_WEIGHT_PROFILES,
     CpuSchedulingConfig,
     GpuSchedulingConfig,
     concurrency_warning,
@@ -63,6 +64,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     gpu.add_argument("--min-cpus", type=int, default=1)
     gpu.add_argument("--min-memory-mb", type=int, default=0)
     gpu.add_argument("--layout", choices=("single-task", "one-task-per-gpu"), default="single-task")
+    gpu.add_argument(
+        "--precision-profile",
+        choices=tuple(sorted(GPU_WEIGHT_PROFILES)),
+        default="tf32",
+        help="GPU ranking profile for the task precision.",
+    )
     gpu.add_argument("--gpu-weight", action="append", default=[], help="Override a GPU weight as name=value.")
 
     fixtures = parser.add_argument_group("fixtures")
@@ -142,12 +149,13 @@ def _build_plan(args: argparse.Namespace) -> dict[str, Any]:
     nodes = _load_gpu_nodes(args)
     config = GpuSchedulingConfig(
         accelerator=args.accelerator,
+        precision_profile=args.precision_profile,
         allowed_partitions=parse_partition_list(args.partition),
         min_gpus=args.min_gpus,
         min_cpus=args.min_cpus,
         min_memory_mb=args.min_memory_mb,
         layout=args.layout,
-        gpu_weights=parse_gpu_weights(args.gpu_weight),
+        gpu_weights=parse_gpu_weights(args.gpu_weight, precision_profile=args.precision_profile),
     )
     return plan_slurm_job(
         kind="gpu",
@@ -196,6 +204,7 @@ def _print_summary(plan: dict[str, Any], output_json: str | None) -> None:
         print(f"  selected_node: {node['name']}")
         print(f"  selected_partition: {selection['selected_partition']}")
         print(f"  gpu_model: {node['gpu_model_key']}")
+        print(f"  precision_profile: {plan['config']['precision_profile']}")
         print(f"  requested_gpus: {request['gpus']}")
         print(f"  requested_cpus: {request['cpus']}")
         print(f"  requested_gres: {request['gres']}")

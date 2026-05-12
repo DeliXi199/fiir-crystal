@@ -14,12 +14,17 @@ import subprocess
 from typing import Any, Iterable, Sequence
 
 from fiir_crystal.slurm_gpu_policy import (
+    DEFAULT_GPU_PRECISION_PROFILE,
     DEFAULT_GPU_WEIGHTS,
+    FP64_GPU_WEIGHTS,
+    GPU_WEIGHT_PROFILES,
     GpuNode,
     GpuSchedulingConfig,
     build_sbatch_plan as build_gpu_sbatch_plan,
     config_to_dict as gpu_config_to_dict,
     discover_gpu_nodes,
+    gpu_weights_for_profile,
+    normalize_precision_profile,
     parse_gpu_weights,
     parse_gres,
     parse_partition_list,
@@ -543,7 +548,10 @@ def _run_command(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
 
 __all__ = [
     "CPU_PARTITION_ORDER_DEFAULT",
+    "DEFAULT_GPU_PRECISION_PROFILE",
     "DEFAULT_GPU_WEIGHTS",
+    "FP64_GPU_WEIGHTS",
+    "GPU_WEIGHT_PROFILES",
     "CpuNode",
     "CpuSchedulingConfig",
     "CpuSelection",
@@ -557,6 +565,8 @@ __all__ = [
     "discover_cpu_nodes",
     "discover_gpu_nodes",
     "gpu_config_to_dict",
+    "gpu_weights_for_profile",
+    "normalize_precision_profile",
     "normalize_partition_name",
     "normalize_partitions",
     "parse_gpu_weights",
