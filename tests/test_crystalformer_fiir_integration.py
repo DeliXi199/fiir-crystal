@@ -50,8 +50,8 @@ def test_external_record_to_structure_like_marks_f3_unavailable_low_confidence(t
 
     assert label.f3_stability == 0.5
     assert label.is_stable is False
-    assert label.calibration_tier == 1
-    assert label.confidence == 0.5
+    assert label.calibration_tier == 4
+    assert label.confidence == 0.2
     assert label.metadata["stability"]["source"] == "unavailable_without_offline_validation"
     assert "unavailable_reason" in label.metadata["stability"]
 

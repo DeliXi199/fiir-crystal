@@ -56,11 +56,13 @@
 | `f1_fail_rate` | `f1_geometry >= threshold` 的比例 | lower | 默认阈值 `0.1`，可配置 |
 | `f2_fail_rate` | `f2_chemistry >= threshold` 的比例 | lower | 默认阈值 `0.1` |
 | `stable_rate` | `f3_stability < 0.1` 的比例 | higher | 仅统计 F3 已知样本，另报 unknown 数 |
+| `f4_leakage_rate` | `f4_novelty_leakage >= threshold` 的比例 | lower | 仅统计 F4 已知样本，另报 unavailable |
+| `f5_unsynthesizable_rate` | `f5_synthesizability >= threshold` 的比例 | lower | 仅统计 F5 已知样本，另报 unavailable |
 | `near_miss_rate` | `0.1 <= f3_stability <= 0.2` 的比例 | diagnostic | FSAL 样本池质量 |
 | `moderate_failure_rate` | `0.2 < f3_stability <= 0.5` 的比例 | lower |  |
 | `catastrophic_failure_rate` | `f3_stability > 0.5` 或 pre-filter severe 的比例 | lower |  |
-| `failure_vector_mean` | F1/F2/F3 均值 | lower | F3 单位保持 `eV/atom` |
-| `failure_vector_quantiles` | F1/F2/F3 的 p10/p50/p90 | diagnostic | 观察分布形状 |
+| `failure_vector_mean` | F1-F5 均值 | lower | F4/F5 缺失时逐轴报告 unavailable |
+| `failure_vector_quantiles` | F1-F5 的 p10/p50/p90 | diagnostic | 观察分布形状 |
 | `calibration_tier_distribution` | Tier 1-4 占比 | diagnostic | Tier 1 不应由代码伪造 |
 | `uncertainty_distribution` | uncertainty 均值和分位数 | diagnostic | 用于发现低置信标签 |
 
@@ -78,6 +80,7 @@ F3 unknown 必须单独报告，不得当作稳定或失败静默计入。
 | `label_confidence_mean` | pair confidence 均值 | higher | 由 calibration tier 决定 |
 | `tier_pair_distribution` | pair 中最低 tier 的分布 | diagnostic | 检查低置信 pair 占比 |
 | `failure_bucket_ratio` | near/moderate/catastrophic pair 比例 | target_range | 默认目标 `60/30/10` |
+| `f4_filtered_pair_count` | 因 F4 泄漏风险被过滤的 pair 数 | diagnostic | F4 不作为训练目标，只做约束 |
 | `chemical_bucket_coverage` | 参与 pair 的化学桶数量 | higher | 防止只覆盖少数体系 |
 | `winner_loser_atom_count_shift` | winner 与 loser 原子数差分布 | lower | 检查短序列偏置 |
 
@@ -90,6 +93,8 @@ F3 unknown 必须单独报告，不得当作稳定或失败静默计入。
 | `f1_fail_delta` | 方法 F1 fail rate - baseline | lower | 负值表示改善 |
 | `f2_fail_delta` | 方法 F2 fail rate - baseline | lower |  |
 | `f3_fail_delta` | 方法 F3 fail rate - baseline | lower |  |
+| `f4_leakage_delta` | 方法 F4 leakage rate - baseline | lower | 约束/评估指标 |
+| `f5_unsynthesizable_delta` | 方法 F5 failure rate - baseline | lower | discovery 指标 |
 | `unique_formula_rate` | unique reduced formula 数 / 总样本数 | higher | 粗粒度多样性 |
 | `structure_unique_rate` | 去重后结构数 / 总样本数 | higher | 依赖本地 StructureMatcher 或 adapter 结果 |
 | `novel_rate` | 与训练/已知结构不匹配的比例 | higher | 只使用本地 provided index，不调用外部 DB |
@@ -151,7 +156,7 @@ Novelty 和 uniqueness 的匹配容差必须写入 `MetricReport.config`。默�
 最小闭环必须至少报告：
 
 1. 输入候选数与 pre-filter rate。
-2. F1/F2/F3 failure rates 和 stable rate。
+2. F1-F5 failure rates、stable rate，以及 F3/F4/F5 unavailable 统计。
 3. Matched axis-aligned pair 数、axis 分布、pair quality。
 4. FSAL trainer 调用后的训练摘要占位指标。
 5. Novelty、diversity、composition entropy。
@@ -170,7 +175,7 @@ Novelty 和 uniqueness 的匹配容差必须写入 `MetricReport.config`。默�
 当前 `EvaluationReport` 已覆盖可配置 mock 实验需要的核心指标：
 
 - candidate count、valid rate、failure rate、hard failure count；
-- average/max F1/F2/F3；
+- average/max F1-F5，其中 F4/F5 可为 unavailable；
 - calibration tier distribution；
 - pair count、pairs by axis、pairs by mode；
 - average pair margin、average pair confidence、valid pair ratio；

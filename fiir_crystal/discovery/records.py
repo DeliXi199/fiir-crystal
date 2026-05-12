@@ -58,6 +58,8 @@ class AcquisitionScore:
     pred_f1: float | None = None
     pred_f2: float | None = None
     pred_f3: float | None = None
+    pred_f4: float | None = None
+    pred_f5: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -71,6 +73,8 @@ class AcquisitionScore:
             "pred_f1": self.pred_f1,
             "pred_f2": self.pred_f2,
             "pred_f3": self.pred_f3,
+            "pred_f4": self.pred_f4,
+            "pred_f5": self.pred_f5,
             "metadata": dict(self.metadata),
         }
 
@@ -86,6 +90,8 @@ class AcquisitionScore:
             pred_f1=data.get("pred_f1"),
             pred_f2=data.get("pred_f2"),
             pred_f3=data.get("pred_f3"),
+            pred_f4=data.get("pred_f4"),
+            pred_f5=data.get("pred_f5"),
             metadata=dict(data.get("metadata", {})),
         )
 

@@ -1,4 +1,4 @@
-"""Mock active discovery loop for lightweight FIIR-v1."""
+"""Mock active discovery loop for lightweight FIIR."""
 
 from __future__ import annotations
 
@@ -111,6 +111,8 @@ class MockRanker(Ranker):
                         pred_f1=vector.f1_geometry if vector else None,
                         pred_f2=vector.f2_chemistry if vector else None,
                         pred_f3=vector.f3_stability if vector else None,
+                        pred_f4=vector.f4_novelty_leakage if vector else None,
+                        pred_f5=vector.f5_synthesizability if vector else None,
                     ),
                     pareto_layer=0,
                     rank=0,

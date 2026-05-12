@@ -94,6 +94,8 @@ class AxisAlignedPairMiner(MatchedAxisAlignedPairMiner):
                 "pair_count": len(pairs),
                 "pairs_by_axis": {axis.value: len(axis_pairs) for axis, axis_pairs in pairs_by_axis.items()},
                 "rejection_reasons": rejected,
+                "chemical_bucket_coverage": len({candidate.chemical_bucket for candidate in usable}),
+                "prototype_coverage": len({candidate.prototype for candidate in usable if candidate.prototype}),
             },
             config={
                 "main_axis_threshold": cfg.main_axis_threshold,
@@ -102,6 +104,7 @@ class AxisAlignedPairMiner(MatchedAxisAlignedPairMiner):
                 "require_prototype_match": cfg.require_prototype_match,
                 "require_space_group_match": cfg.require_space_group_match,
                 "require_composition_family_match": cfg.require_composition_family_match,
+                "max_f4_leakage": cfg.max_f4_leakage,
                 "min_pair_quality": cfg.min_pair_quality,
             },
         )
@@ -143,6 +146,8 @@ class AxisAlignedPairMiner(MatchedAxisAlignedPairMiner):
     ) -> str | None:
         if not self._metadata_matches(left, right, config):
             return "metadata_mismatch"
+        if self._fails_f4_filter(left, config) or self._fails_f4_filter(right, config):
+            return "f4_leakage_filter"
 
         left_main = self._failure_value(left, main_field)
         right_main = self._failure_value(right, main_field)
@@ -210,7 +215,8 @@ class AxisAlignedPairMiner(MatchedAxisAlignedPairMiner):
         other_similarity = max(0.0, 1.0 - (sum(other_delta.values()) / len(other_delta)))
         structure_match = self._structure_match_score(left, right)
         label_confidence = self._pair_confidence(left, right, main_gap, structure_match, config)
-        pair_quality = main_gap * other_similarity * structure_match * label_confidence
+        f4_factor = self._f4_pair_factor(left, right)
+        pair_quality = main_gap * other_similarity * structure_match * label_confidence * f4_factor
         margin = self._margin_for_gap(main_gap)
         match_metadata = self._match_description(left, right)
         reason = f"axis_aligned_{axis.value.lower()}_gap"
@@ -238,6 +244,7 @@ class AxisAlignedPairMiner(MatchedAxisAlignedPairMiner):
                 "winner_structure_ref": winner.structure_ref,
                 "loser_structure_ref": loser.structure_ref,
                 "confidence": label_confidence,
+                "f4_pair_factor": f4_factor,
                 "reason": reason,
             },
         )
@@ -304,9 +311,30 @@ class AxisAlignedPairMiner(MatchedAxisAlignedPairMiner):
             "f1_geometry": self._failure_value(candidate, "f1_geometry"),
             "f2_chemistry": self._failure_value(candidate, "f2_chemistry"),
             "f3_stability": self._failure_value(candidate, "f3_stability"),
+            "f4_novelty_leakage": self._failure_value(candidate, "f4_novelty_leakage"),
+            "f5_synthesizability": self._failure_value(candidate, "f5_synthesizability"),
         }
 
     def _is_candidate_valid(self, candidate: LabeledCandidate) -> bool:
         if candidate.failure_vector is not None:
             return candidate.failure_vector.is_valid
         return not candidate.failure_label.pre_filtered
+
+    def _fails_f4_filter(self, candidate: LabeledCandidate, config: MatchedPairConfig) -> bool:
+        if config.max_f4_leakage is None:
+            return False
+        value = self._failure_value(candidate, "f4_novelty_leakage")
+        return value is not None and value > config.max_f4_leakage
+
+    def _f4_pair_factor(self, left: LabeledCandidate, right: LabeledCandidate) -> float:
+        values = [
+            value
+            for value in (
+                self._failure_value(left, "f4_novelty_leakage"),
+                self._failure_value(right, "f4_novelty_leakage"),
+            )
+            if value is not None
+        ]
+        if not values:
+            return 1.0
+        return max(0.0, 1.0 - max(values))

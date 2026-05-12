@@ -15,7 +15,7 @@
 
 ## 输入前置条件
 
-FSAL 只消费 `failure_taxonomy.md` 定义的 `FailureLabel`。进入 pair mining 的样本必须满足：
+FSAL 只消费 `failure_taxonomy.md` 定义的 `FailureLabel`。主训练 pair 仅使用 F1/F2/F3；F4 只作为泄漏过滤或 pair quality 因子，F5 不进入 DPO preference dataset。进入 pair mining 的样本必须满足：
 
 - `pre_filtered == false`。
 - 至少一个主轴存在可比较数值。
@@ -46,6 +46,7 @@ Pre-filter 样本只进入统计报告，不进入 DPO preference dataset。
 | `main_axis_threshold` | `0.3` | 主轴差值下限 |
 | `other_axis_threshold` | `0.15` | 非主轴最大允许差值 |
 | `atom_count_tolerance` | `0.2` | 原子数相对差不超过 20% |
+| `max_f4_leakage` | `None` | 可选 F4 泄漏风险上限，超过则 pair 前过滤 |
 | `min_structure_match_score` | `0.0` | 结构软匹配下限 |
 | `min_pair_quality` | `0.3` | 低于该值的 pair 丢弃 |
 | `max_pairs_per_axis` | configurable | 每个轴最大 pair 数 |
@@ -61,8 +62,8 @@ Pre-filter 样本只进入统计报告，不进入 DPO preference dataset。
 | `winner_id` | string | 主轴 failure 更低的样本 |
 | `loser_id` | string | 主轴 failure 更高的样本 |
 | `axis` | enum | `F1_GEOMETRY`、`F2_CHEMISTRY`、`F3_STABILITY`、`MIXED` |
-| `winner_failure` | map | winner 的 F1/F2/F3 摘要 |
-| `loser_failure` | map | loser 的 F1/F2/F3 摘要 |
+| `winner_failure` | map | winner 的 F1/F2/F3 摘要，含可选 F4/F5 |
+| `loser_failure` | map | loser 的 F1/F2/F3 摘要，含可选 F4/F5 |
 | `main_axis_gap` | float | 主轴差值 |
 | `other_axis_delta` | map | 非主轴差值 |
 | `other_axis_similarity` | float | `1 - mean(other_axis_delta)`，裁剪到 `[0, 1]` |
@@ -76,7 +77,9 @@ Pre-filter 样本只进入统计报告，不进入 DPO preference dataset。
 
 `pair_quality` 默认定义为：
 
-`main_axis_gap * other_axis_similarity * structure_match_score * label_confidence`
+`main_axis_gap * other_axis_similarity * structure_match_score * label_confidence * f4_pair_factor`
+
+若两个样本都没有 F4，`f4_pair_factor = 1.0`。若存在 F4，泄漏风险越高，pair quality 越低。
 
 ### PreferenceDataset
 
@@ -104,13 +107,14 @@ Pair mining 目标：构造“主轴差异大，其他轴相近，化学/结构�
 6. 要求所有非主轴差值不超过 `other_axis_threshold`。
 7. 计算 `structure_match_score`，至少包括原子数相似度和元素重叠；如可用，可加入晶系和 prototype 相似度。
 8. 从两个样本的 `calibration_tier` 得到 `label_confidence`，取较小者。
-9. 计算 `pair_quality`，低于 `min_pair_quality` 则丢弃。
-10. 主轴 failure 更低者为 winner，更高者为 loser。
-11. 根据 `main_axis_gap` 赋予 margin：
+9. 可选应用 `max_f4_leakage`，剔除疑似泄漏或训练集近重复样本。
+10. 计算 `pair_quality`，低于 `min_pair_quality` 则丢弃。
+11. 主轴 failure 更低者为 winner，更高者为 loser。
+12. 根据 `main_axis_gap` 赋予 margin：
     - `< 0.15`：`0.1`
     - `0.15-0.4`：`0.3`
     - `>= 0.4`：`0.5`
-12. 写入 `PreferenceDataset`，并记录所有过滤统计。
+13. 写入 `PreferenceDataset`，并记录所有过滤统计、chemical bucket coverage 和 prototype coverage。
 
 `MIXED` pairs 只用于 baseline 或兜底实验。主方法必须以 F1/F2/F3 axis-aligned pairs 为核心。
 
@@ -143,7 +147,7 @@ Pair mining 目标：构造“主轴差异大，其他轴相近，化学/结构�
 - `pair_margin`
 - `beta`
 
-## On-Policy Refresh
+## Semi-On-Policy Refresh
 
 FSAL 最小训练闭环按轮次组织：
 
@@ -153,7 +157,7 @@ FSAL 最小训练闭环按轮次组织：
 4. 生成 `PreferenceDataset`。
 5. 调用 `FSALTrainer.fit` 接口。
 6. 调用 evaluation 接口记录 stable rate、failure rates、novelty、diversity、pair quality。
-7. 下一轮使用更新后的 policy 重新生成、重新标注、重新配对。
+7. 下一轮使用更新后的 policy 重新生成、重新标注、重新配对；工程上允许按 guidance 采用 cached pairs + 新生成 pairs 的 semi-on-policy 策略。
 
 第一阶段允许 trainer 不更新模型，但必须保留 round-level 输入输出和日志结构，以便后续替换为真实训练。
 
@@ -175,8 +179,8 @@ FSAL 不只优化稳定性，还必须监控多样性。每轮训练摘要至少
 FSAL 覆盖闭环第 3 和第 4 步：
 
 1. 输入候选晶体结构。
-2. 使用 failure taxonomy 输出 F1/F2/F3 failure vector。
-3. 构造 matched axis-aligned preference pairs。
+2. 使用 failure taxonomy 输出 F1-F5 failure vector；F4/F5 可为空。
+3. 构造 matched F1/F2/F3 axis-aligned preference pairs，F4 仅用于过滤/质量因子，F5 不进入训练。
 4. 调用 FSAL trainer 接口，产生训练摘要或占位模型引用。
 5. 将新模型或模型引用交给 evaluation 与 discovery pipeline。
 
@@ -205,7 +209,7 @@ FSAL 覆盖闭环第 3 和第 4 步：
 当前 `AxisAlignedPairMiner` 已实现轻量 matched axis-aligned preference dataset 构造：
 
 - 输入 `LabeledCandidate`，可同时携带 `FailureLabel` 和 `FailureVector`。
-- 支持 F1/F2/F3 三个 axis 的 pair mining。
+- 支持 F1/F2/F3 三个 axis 的 pair mining；可选 F4 泄漏过滤和 pair quality 因子。
 - 支持 prototype match、num_atoms tolerance、可选 space group match、可选 composition family match。
 - pair 输出 winner、loser、axis、margin、confidence、`match_metadata`、reason 和 failure summaries。
 - pair confidence 综合 winner/loser failure confidence、main-axis margin 和结构匹配程度。

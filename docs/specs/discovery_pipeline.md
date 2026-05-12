@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `discovery.pipeline` | 编排 generate -> prefilter -> screen -> rank -> export -> feedback | 具体外部计算 |
 | `discovery.screening` | 定义 Failure Predictor、MLIP、synthesizability、novelty screening adapter 接口 | 第一阶段不调用真实模型/API |
-| `discovery.ranking` | 多目标 ranking、Pareto layer、代表性选择 | 不把所有目标硬压成单一 `f1+f2+f3` |
+| `discovery.ranking` | 多目标 ranking、Pareto layer、代表性选择 | 不把所有目标硬压成单一 scalar |
 | `discovery.validation` | 生成 validation task metadata，接收离线 validation result | 不生成真实 DFT 输入并提交任务 |
 | `discovery.feedback` | 将验证结果回写为 failure buffer 和主动学习记录 | 不训练 predictor 或 generator |
 | `evaluation` | 计算 funnel、novelty、diversity、stability 等指标 | 不负责 pipeline 编排 |
@@ -43,6 +43,7 @@
 | `source_model` | string | generator 名称 |
 | `round_id` | string | active loop 轮次 |
 | `failure_label` | `FailureLabel` or null | 已计算标签 |
+| `failure_vector` | `FailureVector` or null | 已计算或导入的 F1-F5 failure vector |
 | `predicted_failure` | map or null | Failure Predictor 输出 |
 | `screening_records` | list | 各筛选层记录 |
 | `ranking_record` | map or null | ranking 结果 |
@@ -63,6 +64,8 @@ Failure Predictor 在 discovery 中作为 critic 和 acquisition function，不�
 | `pred_f1` | float or null | 预测 F1 |
 | `pred_f2` | float or null | 预测 F2 |
 | `pred_f3` | float or null | 预测 F3 |
+| `pred_f4` | float or null | 预测或导入的 F4 泄漏/novelty 风险 |
+| `pred_f5` | float or null | 预测或导入的 F5 可合成性失败风险 |
 | `metadata` | map | 权重、版本、feature 摘要 |
 
 默认 utility 采用可配置加权：
@@ -138,7 +141,7 @@ Failure Predictor 在 discovery 中作为 critic 和 acquisition function，不�
 
 1. `generate`：从 FSAL model adapter 或离线列表获得候选。
 2. `pre_filter`：调用 failure taxonomy 中的 pre-filter，记录被移除比例和原因。
-3. `score`：调用 Failure Predictor 或 mock predictor，得到 predicted F1/F2/F3、uncertainty。
+3. `score`：调用 Failure Predictor 或 mock predictor，得到 predicted F1-F5 和 uncertainty；F4/F5 可为空。
 4. `acquire`：计算 acquisition score。
 5. `screen`：按可用 adapter 追加筛选记录。不可用 adapter 必须返回 `unavailable`，不能隐式跳过。
 6. `rank`：在 stability、novelty、diversity、cost 等目标上做 Pareto ranking。
@@ -151,7 +154,7 @@ Failure Predictor 在 discovery 中作为 critic 和 acquisition function，不�
 
 | Adapter | 输入 | 输出 | 第一阶段行为 |
 | --- | --- | --- | --- |
-| `FailurePredictorAdapter` | `DiscoveryCandidate` | `AcquisitionScore` + `ScreeningDecision` | 可用 mock 或离线预测 |
+| `FailurePredictorAdapter` | `DiscoveryCandidate` | `AcquisitionScore` + `ScreeningDecision` | 可用 mock 或离线预测，支持 F1-F5 |
 | `MLIPValidationAdapter` | `DiscoveryCandidate` | `ScreeningDecision` / `ValidationTask` | 只生成任务，不运行 MLIP |
 | `SynthesizabilityAdapter` | `DiscoveryCandidate` | `ScreeningDecision` / `ValidationTask` | 不调用 CSLLM |
 | `NoveltyAdapter` | `DiscoveryCandidate` + 本地 known index | `ScreeningDecision` | 不调用 MP/ICSD/GNoME API |
@@ -166,7 +169,8 @@ Adapter 返回 `unavailable` 时，pipeline 应继续运行并在报告中记录
 | 目标 | 方向 | 来源 |
 | --- | --- | --- |
 | stability / predicted success | 越高越好 | Failure Predictor 或 failure label |
-| novelty | 越高越好 | 本地 known structure index 或 adapter |
+| novelty / low leakage risk | 越高越好 | 本地 known structure index、F4 或 adapter |
+| synthesizability | 越高越好 | F5、离线 score 或 adapter |
 | diversity | 越高越好 | 组成频率、结构簇覆盖 |
 | uncertainty | 可作为探索奖励 | Failure Predictor |
 | cost | 越低越好 | 原子数、元素数、验证层级估计 |
@@ -187,7 +191,7 @@ Repair 是 discovery 的扩展点，不是第一阶段核心实现。
 Discovery 使用前面模块的结果形成闭环末端：
 
 1. 输入候选晶体结构或 FSAL 模型引用。
-2. 调用 failure labeler / predictor 得到 failure score。
+2. 调用 failure labeler / predictor 得到 F1-F5 failure score；F4/F5 不可用时显式为空。
 3. 调用 screening adapter 产生筛选记录。
 4. 调用 ranking 接口做多目标排序。
 5. 导出 Top-K validation task metadata。
@@ -207,9 +211,9 @@ Discovery 使用前面模块的结果形成闭环末端：
 当前 `MockDiscoveryPipeline` 已实现本地 active discovery skeleton：
 
 - 输入 `StructureLike` / `CrystalRecord` 或已有 `DiscoveryCandidate`。
-- 使用 `FailureOracle` 生成 `FailureVector` 和兼容 `FailureLabel`。
+- 使用 `FailureOracle` 生成 `FailureVector` 和兼容 `FailureLabel`，其中 F4/F5 可从 metadata 透传。
 - `MockScreeningAdapter` 按 validity 和 aggregate failure score 筛选。
-- `MockRanker` 使用 utility-style ranking，考虑 lower F1/F2/F3、higher confidence、validity、novelty placeholder、diversity placeholder 和简单 cost。
+- `MockRanker` 使用 utility-style ranking，考虑 lower F1/F2/F3、higher confidence、validity、novelty placeholder、diversity placeholder 和简单 cost；F4/F5 如存在会写入 acquisition 记录。
 - `MockValidationAdapter` 只生成 validation task metadata，不运行外部验证。
 - `MockFeedbackSink` 输出 top-k feedback records，包含 candidate id、selected rank、failure vector、decision、reason 和 metadata。
 - `MockRanker` 当前支持 `utility` 和轻量 `pareto` ranking mode。

@@ -102,8 +102,8 @@ def test_failure_oracle_outputs_vector_and_rule_based_tier() -> None:
 
     assert vector.is_valid is True
     assert vector.hard_failures == []
-    assert vector.calibration_tier == 2
-    assert vector.confidence == 0.7
+    assert vector.calibration_tier == 3
+    assert vector.confidence == 0.5
 
 
 def test_failure_oracle_invalid_structure_gets_tier_zero() -> None:
@@ -126,7 +126,22 @@ def test_failure_oracle_invalid_structure_gets_tier_zero() -> None:
 def test_mock_failure_labeler_preserves_mock_only_tier() -> None:
     vector = MockFailureLabeler().vectorize(_good_structure("mock_only"))
 
-    assert vector.calibration_tier == 1
+    assert vector.calibration_tier == 4
+    assert vector.confidence == 0.2
+
+
+def test_failure_oracle_passes_through_optional_f4_f5() -> None:
+    structure = _good_structure("with_f4_f5")
+    structure.metadata["f4_novelty_leakage"] = 0.25
+    structure.metadata["f5_synthesizability"] = 0.35
+
+    vector = FailureOracle.default().vectorize(structure)
+    label = FailureOracle.default().label_structure(structure)
+
+    assert vector.f4_novelty_leakage == 0.25
+    assert vector.f5_synthesizability == 0.35
+    assert label.f4_novelty_leakage == 0.25
+    assert label.f5_synthesizability == 0.35
 
 
 def test_pair_mining_generates_all_axes_and_respects_constraints() -> None:
@@ -163,6 +178,23 @@ def test_pair_mining_num_atom_tolerance_blocks_mismatch() -> None:
     assert dataset.stats["rejection_reasons"]["metadata_mismatch"] >= 1
 
 
+def test_pair_mining_can_filter_high_f4_leakage() -> None:
+    oracle = FailureOracle.default()
+    winner = _good_structure("winner")
+    loser = _good_structure("leaky_loser")
+    loser.mock_geometry_score = 0.8
+    loser.metadata["f4_novelty_leakage"] = 0.9
+    candidates = build_labeled_candidates(oracle, [winner, loser])
+
+    dataset = AxisAlignedPairMiner().mine(
+        candidates,
+        config=MatchedPairConfig(min_pair_quality=0.0, max_f4_leakage=0.5),
+    )
+
+    assert dataset.pairs == []
+    assert dataset.stats["rejection_reasons"]["f4_leakage_filter"] >= 1
+
+
 def test_evaluation_report_contains_extended_metrics() -> None:
     oracle = FailureOracle.default()
     candidates = build_labeled_candidates(oracle, demo_mock_crystals())
@@ -173,7 +205,7 @@ def test_evaluation_report_contains_extended_metrics() -> None:
 
     assert report.valid_rate == 1.0
     assert report.max_f3 == 0.72
-    assert report.calibration_tier_distribution == {2: 7}
+    assert report.calibration_tier_distribution == {3: 7}
     assert report.average_pair_confidence > 0
 
 

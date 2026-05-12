@@ -53,6 +53,7 @@ class MatchedPairConfig:
     require_prototype_match: bool = True
     require_space_group_match: bool = False
     require_composition_family_match: bool = False
+    max_f4_leakage: float | None = None
     min_structure_match_score: float = 0.0
     min_pair_quality: float = 0.3
     max_pairs_per_axis: int | None = None

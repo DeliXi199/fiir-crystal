@@ -43,12 +43,16 @@ def test_failure_dataclasses_can_be_instantiated() -> None:
         f1_geometry=0.0,
         f2_chemistry=0.0,
         f3_stability=0.05,
+        f4_novelty_leakage=0.0,
+        f5_synthesizability=0.2,
         axis_scores=[score],
-        calibration_tier=4,
+        calibration_tier=1,
     )
     batch = FailureLabelBatch(labels=[label])
 
     assert label.is_stable is True
+    assert label.f4_novelty_leakage == 0.0
+    assert label.f5_synthesizability == 0.2
     assert batch.labels[0].sample_id == "s1"
 
 
@@ -89,7 +93,7 @@ def test_generation_predictor_evaluation_and_discovery_dataclasses() -> None:
     candidate = CandidateRecord(sample_id="s1", structure={"mock": True})
     request = GenerationRequest(num_samples=1, seed=7)
     result = GenerationResult(candidates=[candidate], model_id="mock", request=request)
-    prediction = FailurePrediction(sample_id="s1", pred_f1=0.1, pred_f2=0.2)
+    prediction = FailurePrediction(sample_id="s1", pred_f1=0.1, pred_f2=0.2, pred_f4=0.3, pred_f5=0.4)
     metric = MetricValue(
         name=EvaluationMetric.VALIDITY.value,
         value=1.0,
@@ -106,7 +110,7 @@ def test_generation_predictor_evaluation_and_discovery_dataclasses() -> None:
         adapter_name="mock",
         status=ScreeningStatus.PASS,
     )
-    acquisition = AcquisitionScore(utility=0.5)
+    acquisition = AcquisitionScore(utility=0.5, pred_f4=0.3, pred_f5=0.4)
     ranked = RankedCandidate(
         candidate_id="c1",
         acquisition=acquisition,
@@ -122,6 +126,8 @@ def test_generation_predictor_evaluation_and_discovery_dataclasses() -> None:
     )
 
     assert result.candidates[0].sample_id == prediction.sample_id
+    assert prediction.pred_f4 == acquisition.pred_f4
+    assert prediction.pred_f5 == acquisition.pred_f5
     assert metric.value == 1.0
     assert discovery_candidate.candidate_id == ranked.candidate_id
     assert decision.status is ScreeningStatus.PASS

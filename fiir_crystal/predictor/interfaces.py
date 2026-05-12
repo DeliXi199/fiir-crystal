@@ -17,6 +17,8 @@ class FailurePrediction:
     pred_f1: float | None = None
     pred_f2: float | None = None
     pred_f3: float | None = None
+    pred_f4: float | None = None
+    pred_f5: float | None = None
     uncertainty: float = 0.0
     confidence: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)

@@ -34,6 +34,8 @@ def render_experiment_report(
         f"- average_f1: {evaluation.get('average_f1', 'unavailable')}",
         f"- average_f2: {evaluation.get('average_f2', 'unavailable')}",
         f"- average_f3: {evaluation.get('average_f3', 'unavailable')}",
+        f"- average_f4: {evaluation.get('average_f4', 'unavailable')}",
+        f"- average_f5: {evaluation.get('average_f5', 'unavailable')}",
         f"- failure_rate: {evaluation.get('failure_rate', 'unavailable')}",
         f"- calibration_tier_distribution: {evaluation.get('calibration_tier_distribution', {})}",
         "",

@@ -16,12 +16,13 @@ from fiir_crystal.failure.taxonomy import (
     FailureSeverity,
     FailureVector,
     TierSource,
+    tier_weight,
 )
 
 
 @dataclass(slots=True)
 class FailureOracle:
-    """Composable F1/F2/F3 oracle backed by lightweight replaceable labelers."""
+    """Composable F1/F2/F3 oracle with optional F4/F5 metadata pass-through."""
 
     geometry_labeler: GeometryFailureLabeler
     chemistry_labeler: ChemistryFailureLabeler
@@ -46,7 +47,19 @@ class FailureOracle:
         hard_failures = [*geometry.hard_failures, *chemistry.hard_failures, *stability.hard_failures]
         is_valid = not hard_failures and structure.num_atoms > 0
         tier = self._assign_tier(is_valid, hard_failures, geometry, chemistry, stability)
-        confidence = self._confidence_for_tier(tier)
+        confidence = tier_weight(tier)
+        f4_novelty_leakage = self._optional_metadata_float(
+            structure,
+            "f4_novelty_leakage",
+            "mock_leakage_score",
+            "leakage_score",
+        )
+        f5_synthesizability = self._optional_metadata_float(
+            structure,
+            "f5_synthesizability",
+            "mock_synthesizability_failure",
+            "synthesizability_failure",
+        )
 
         return FailureVector(
             sample_id=structure.candidate_id,
@@ -54,6 +67,8 @@ class FailureOracle:
             f1_geometry=geometry.f1_geometry,
             f2_chemistry=chemistry.f2_chemistry,
             f3_stability=stability.f3_stability,
+            f4_novelty_leakage=f4_novelty_leakage,
+            f5_synthesizability=f5_synthesizability,
             confidence=confidence,
             uncertainty=1.0 - confidence,
             calibration_tier=tier,
@@ -69,6 +84,8 @@ class FailureOracle:
                 "geometry": geometry.evidence,
                 "chemistry": chemistry.evidence,
                 "stability": stability.evidence,
+                "f4_novelty_leakage": f4_novelty_leakage,
+                "f5_synthesizability": f5_synthesizability,
                 "tier_note": self._tier_note(tier),
             },
         )
@@ -83,6 +100,8 @@ class FailureOracle:
             f1_geometry=vector.f1_geometry,
             f2_chemistry=vector.f2_chemistry,
             f3_stability=vector.f3_stability,
+            f4_novelty_leakage=vector.f4_novelty_leakage,
+            f5_synthesizability=vector.f5_synthesizability,
             f3_normalized=vector.f3_stability,
             axis_scores=[
                 self._axis_score(FailureAxis.F1_GEOMETRY, vector.f1_geometry, "unitless", vector),
@@ -103,35 +122,34 @@ class FailureOracle:
             return int(CalibrationTier.TIER_0)
         sources = [getattr(result, "evidence", {}).get("source") for result in results]
         if any(source in {"missing_placeholder", "unavailable_without_offline_validation"} for source in sources):
-            return int(CalibrationTier.TIER_1)
+            return int(CalibrationTier.TIER_4)
         if sources and all(source == "mock" for source in sources):
-            return int(CalibrationTier.TIER_1)
-        return int(CalibrationTier.TIER_2)
-
-    def _confidence_for_tier(self, tier: int) -> float:
-        return {
-            0: 0.0,
-            1: 0.5,
-            2: 0.7,
-            3: 0.85,
-            4: 1.0,
-        }.get(tier, 0.0)
+            return int(CalibrationTier.TIER_4)
+        return int(CalibrationTier.TIER_3)
 
     def _tier_source(self, tier: int) -> str:
         return {
             0: TierSource.INVALID.value,
-            1: TierSource.MOCK_ONLY.value,
-            2: TierSource.RULE_BASED.value,
-            3: TierSource.MULTI_ADAPTER_AGREEMENT.value,
-            4: TierSource.DFT_PROVIDED.value,
+            1: TierSource.DFT_PROVIDED.value,
+            2: TierSource.MULTI_ADAPTER_AGREEMENT.value,
+            3: TierSource.SINGLE_ADAPTER.value,
+            4: TierSource.RULES_ONLY.value,
         }.get(tier, TierSource.UNKNOWN.value)
 
     def _tier_note(self, tier: int) -> str:
-        if tier == 3:
-            return "reserved for future ensemble/calibrated lightweight adapters"
+        if tier == 1:
+            return "reserved for DFT-calibrated labels"
+        if tier == 2:
+            return "reserved for future multi-adapter agreement"
         if tier == 4:
-            return "reserved for future DFT-calibrated labels"
+            return "rules/mock-only or unavailable validation; low confidence"
         return self._tier_source(tier)
+
+    def _optional_metadata_float(self, structure: StructureLike, *keys: str) -> float | None:
+        for key in keys:
+            if key in structure.metadata and structure.metadata[key] is not None:
+                return float(structure.metadata[key])
+        return None
 
     def _axis_score(
         self,

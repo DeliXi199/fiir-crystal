@@ -1,4 +1,4 @@
-"""Run the lightweight FIIR-v1 mock closed-loop demo."""
+"""Run the lightweight FIIR mock closed-loop demo."""
 
 from __future__ import annotations
 

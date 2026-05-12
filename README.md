@@ -19,7 +19,7 @@ Implemented today:
 
 - `StructureLike` / `CrystalRecord` mock candidate model.
 - Stdlib-only `CrystalStructureRecord` for real external generator outputs.
-- Lightweight F1/F2/F3 `FailureOracle`.
+- Lightweight F1/F2/F3 `FailureOracle` with optional F4/F5 pass-through fields.
 - Matched axis-aligned preference pairs.
 - Baseline pair modes: `axis_aligned`, `weighted_sum`, `random_negative`, `binary_success_failure`.
 - Evaluation reports with failure, pair, and ranking metrics.
@@ -574,7 +574,7 @@ plus `feedback_buffer.jsonl`, `active_loop_state.json`,
 
 ## Package Layout
 
-- `fiir_crystal.failure`: F1/F2/F3 vectors, lightweight labelers, oracle, and data models.
+- `fiir_crystal.failure`: F1-F5 vectors, lightweight F1/F2/F3 labelers, oracle, and data models.
 - `fiir_crystal.fsal`: matched pair mining and baseline pair construction.
 - `fiir_crystal.discovery`: mock screening, ranking, validation-task metadata, and feedback.
 - `fiir_crystal.structures`: stdlib-only standard structure records for external outputs.

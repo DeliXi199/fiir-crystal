@@ -79,6 +79,10 @@ class EvaluationReport:
     valid_rate: float
     failure_rate: float
     hard_failure_count: int
+    average_f4: float | None = None
+    average_f5: float | None = None
+    max_f4: float | None = None
+    max_f5: float | None = None
     calibration_tier_distribution: dict[int, int] = field(default_factory=dict)
     pair_count: int = 0
     pairs_by_axis: dict[str, int] = field(default_factory=dict)
@@ -110,9 +114,13 @@ class EvaluationReport:
             "average_f1": self.average_f1,
             "average_f2": self.average_f2,
             "average_f3": self.average_f3,
+            "average_f4": self.average_f4,
+            "average_f5": self.average_f5,
             "max_f1": self.max_f1,
             "max_f2": self.max_f2,
             "max_f3": self.max_f3,
+            "max_f4": self.max_f4,
+            "max_f5": self.max_f5,
             "valid_rate": self.valid_rate,
             "failure_rate": self.failure_rate,
             "hard_failure_count": self.hard_failure_count,
@@ -154,9 +162,13 @@ class EvaluationReport:
             average_f1=float(data.get("average_f1", 0.0)),
             average_f2=float(data.get("average_f2", 0.0)),
             average_f3=None if data.get("average_f3") is None else float(data["average_f3"]),
+            average_f4=None if data.get("average_f4") is None else float(data["average_f4"]),
+            average_f5=None if data.get("average_f5") is None else float(data["average_f5"]),
             max_f1=float(data.get("max_f1", 0.0)),
             max_f2=float(data.get("max_f2", 0.0)),
             max_f3=None if data.get("max_f3") is None else float(data["max_f3"]),
+            max_f4=None if data.get("max_f4") is None else float(data["max_f4"]),
+            max_f5=None if data.get("max_f5") is None else float(data["max_f5"]),
             valid_rate=float(data.get("valid_rate", 0.0)),
             failure_rate=float(data.get("failure_rate", 0.0)),
             hard_failure_count=int(data.get("hard_failure_count", 0)),
@@ -229,6 +241,16 @@ def evaluate_mock_fiir_loop(
     f1_values = [float(label.f1_geometry) for label in labels]
     f2_values = [float(label.f2_chemistry) for label in labels]
     f3_values = [float(label.f3_stability) for label in labels if label.f3_stability is not None]
+    f4_values = [
+        float(getattr(label, "f4_novelty_leakage"))
+        for label in labels
+        if getattr(label, "f4_novelty_leakage", None) is not None
+    ]
+    f5_values = [
+        float(getattr(label, "f5_synthesizability"))
+        for label in labels
+        if getattr(label, "f5_synthesizability", None) is not None
+    ]
     failed = [
         label
         for label in labels
@@ -287,6 +309,10 @@ def evaluate_mock_fiir_loop(
         valid_rate=(valid_count / label_count) if label_count else 0.0,
         failure_rate=(len(failed) / label_count) if label_count else 0.0,
         hard_failure_count=hard_failure_count,
+        average_f4=(sum(f4_values) / len(f4_values)) if f4_values else None,
+        average_f5=(sum(f5_values) / len(f5_values)) if f5_values else None,
+        max_f4=max(f4_values) if f4_values else None,
+        max_f5=max(f5_values) if f5_values else None,
         calibration_tier_distribution=tier_distribution,
         pair_count=len(pairs),
         pairs_by_axis=pairs_by_axis,

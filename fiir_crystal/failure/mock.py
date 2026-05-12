@@ -142,6 +142,13 @@ def _coords_or_none(value: Any) -> tuple[tuple[float, float, float], ...] | None
     return tuple(_tuple3_or_none(coord) for coord in value)
 
 
+def _optional_metadata_float(metadata: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        if key in metadata and metadata[key] is not None:
+            return float(metadata[key])
+    return None
+
+
 def _severity_for_unit_interval(value: float | None) -> FailureSeverity:
     if value is None:
         return FailureSeverity.UNKNOWN
@@ -171,7 +178,7 @@ class MockFailureLabeler(FailureLabeler):
 
     def __init__(
         self,
-        calibration_tier: int = int(CalibrationTier.TIER_1),
+        calibration_tier: int = int(CalibrationTier.TIER_4),
         tier_source: str = TierSource.MOCK_ONLY.value,
     ) -> None:
         self.calibration_tier = calibration_tier
@@ -186,6 +193,18 @@ class MockFailureLabeler(FailureLabeler):
             f1_geometry=crystal.mock_geometry_score,
             f2_chemistry=crystal.mock_chemistry_score,
             f3_stability=crystal.mock_stability_score,
+            f4_novelty_leakage=_optional_metadata_float(
+                crystal.metadata,
+                "f4_novelty_leakage",
+                "mock_leakage_score",
+                "leakage_score",
+            ),
+            f5_synthesizability=_optional_metadata_float(
+                crystal.metadata,
+                "f5_synthesizability",
+                "mock_synthesizability_failure",
+                "synthesizability_failure",
+            ),
             confidence=confidence,
             uncertainty=1.0 - confidence,
             calibration_tier=self.calibration_tier,
@@ -244,6 +263,8 @@ class MockFailureLabeler(FailureLabeler):
             f1_geometry=f1,
             f2_chemistry=f2,
             f3_stability=f3,
+            f4_novelty_leakage=vector.f4_novelty_leakage,
+            f5_synthesizability=vector.f5_synthesizability,
             f3_normalized=f3,
             axis_scores=axis_scores,
             uncertainty=vector.uncertainty,

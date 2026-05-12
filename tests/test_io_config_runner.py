@@ -35,6 +35,8 @@ def test_failure_vector_round_trip() -> None:
         f1_geometry=0.1,
         f2_chemistry=0.2,
         f3_stability=0.3,
+        f4_novelty_leakage=0.4,
+        f5_synthesizability=0.5,
         confidence=0.7,
         calibration_tier=2,
         hard_failures=["x"],
@@ -44,6 +46,8 @@ def test_failure_vector_round_trip() -> None:
     loaded = FailureVector.from_dict(vector.to_dict())
 
     assert loaded.sample_id == vector.sample_id
+    assert loaded.f4_novelty_leakage == 0.4
+    assert loaded.f5_synthesizability == 0.5
     assert loaded.hard_failures == ["x"]
     assert loaded.is_valid is False
 

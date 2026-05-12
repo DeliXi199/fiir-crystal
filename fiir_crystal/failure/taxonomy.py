@@ -18,6 +18,8 @@ class FailureAxis(str, Enum):
     F1_GEOMETRY = "F1_GEOMETRY"
     F2_CHEMISTRY = "F2_CHEMISTRY"
     F3_STABILITY = "F3_STABILITY"
+    F4_NOVELTY_LEAKAGE = "F4_NOVELTY_LEAKAGE"
+    F5_SYNTHESIZABILITY = "F5_SYNTHESIZABILITY"
 
 
 class FailureSeverity(str, Enum):
@@ -59,10 +61,10 @@ def tier_weight(tier: int | CalibrationTier) -> float:
 
     return {
         0: 0.0,
-        1: 0.5,
-        2: 0.7,
-        3: 0.85,
-        4: 1.0,
+        1: 1.0,
+        2: 0.8,
+        3: 0.5,
+        4: 0.2,
     }.get(int(tier), 0.0)
 
 
@@ -103,12 +105,18 @@ class FailureScore:
 
 @dataclass(slots=True)
 class FailureVector:
-    """Compact F1/F2/F3 vector used by mock demos and lightweight adapters."""
+    """Compact FIIR failure vector used by mock demos and adapters.
+
+    F1/F2/F3 are the training axes used by FSAL. F4 and F5 are optional
+    constraint/evaluation axes: leakage/novelty and synthesizability.
+    """
 
     sample_id: str
     f1_geometry: float
     f2_chemistry: float
     f3_stability: float | None
+    f4_novelty_leakage: float | None = None
+    f5_synthesizability: float | None = None
     confidence: float = 0.0
     uncertainty: float = 0.0
     calibration_tier: int = int(CalibrationTier.TIER_4)
@@ -141,6 +149,8 @@ class FailureVector:
             "f1_geometry": self.f1_geometry,
             "f2_chemistry": self.f2_chemistry,
             "f3_stability": self.f3_stability,
+            "f4_novelty_leakage": self.f4_novelty_leakage,
+            "f5_synthesizability": self.f5_synthesizability,
             "confidence": self.confidence,
             "uncertainty": self.uncertainty,
             "calibration_tier": self.calibration_tier,
@@ -162,6 +172,12 @@ class FailureVector:
             f1_geometry=float(data["f1_geometry"]),
             f2_chemistry=float(data["f2_chemistry"]),
             f3_stability=None if data.get("f3_stability") is None else float(data["f3_stability"]),
+            f4_novelty_leakage=(
+                None if data.get("f4_novelty_leakage") is None else float(data["f4_novelty_leakage"])
+            ),
+            f5_synthesizability=(
+                None if data.get("f5_synthesizability") is None else float(data["f5_synthesizability"])
+            ),
             confidence=float(data.get("confidence", 0.0)),
             uncertainty=float(data.get("uncertainty", 0.0)),
             calibration_tier=int(data.get("calibration_tier", 0)),
@@ -180,6 +196,8 @@ class FailureLabel:
     f1_geometry: float
     f2_chemistry: float
     f3_stability: float | None
+    f4_novelty_leakage: float | None = None
+    f5_synthesizability: float | None = None
     f3_normalized: float | None = None
     axis_scores: list[FailureScore] = field(default_factory=list)
     uncertainty: float = 0.0
