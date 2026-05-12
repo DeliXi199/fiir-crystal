@@ -214,6 +214,7 @@ def _select_bundles(
     for formula in sorted(by_formula):
         rows = sorted(by_formula[formula], key=_sort_key(sort_mode))
         selected.extend(rows[:per_formula_limit])
+        skipped.extend(_skip_row(bundle, "per_formula_limit_overflow") for bundle in rows[per_formula_limit:])
     selected = sorted(selected, key=lambda item: (item.formula, _sort_key(sort_mode)(item)))
     if max_total is not None:
         overflow = selected[max_total:]

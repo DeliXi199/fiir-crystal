@@ -125,3 +125,37 @@ def test_build_mace_batch_excludes_already_validated_ids(tmp_path: Path) -> None
 
     assert result["summary"]["selected_candidate_count"] == 1
     assert result["summary"]["skipped_reason_counts"] == {"already_validated": 1}
+
+
+def test_build_mace_batch_records_per_formula_overflow(tmp_path: Path) -> None:
+    root = tmp_path / "run" / "smoke" / "crystalformer_audit" / "BaZrO3"
+    candidates = [
+        {"candidate_id": f"cf_{index}", "composition": "BaZrO3", "metadata": {}, "condition": {"formula": "BaZrO3"}}
+        for index in range(3)
+    ]
+    audit = [
+        {
+            "candidate_id": f"cf_{index}",
+            "composition": "BaZrO3",
+            "condition": {"formula": "BaZrO3"},
+            "ranking_score": 1.0 - index * 0.1,
+        }
+        for index in range(3)
+    ]
+    _write_jsonl(root / "candidates.jsonl", candidates)
+    _write_jsonl(root / "audit_candidates.jsonl", audit)
+
+    result = main(
+        [
+            "--candidate-jsonl",
+            str(root / "candidates.jsonl"),
+            "--output-dir",
+            str(tmp_path / "batch"),
+            "--per-formula-limit",
+            "1",
+            "--require-audit",
+        ]
+    )
+
+    assert result["summary"]["selected_candidate_count"] == 1
+    assert result["summary"]["skipped_reason_counts"] == {"per_formula_limit_overflow": 2}
