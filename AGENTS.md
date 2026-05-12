@@ -9,6 +9,8 @@ Startup checklist
 
 - At the start of each new conversation about this project, read this file
   first.
+- Then read `docs/status/current_project_state.md` for the latest saved project
+  state, important run results, and recommended next actions.
 - Then read `docs/guidance/01_fiir_project_manual.md`.
 - For architecture work, important code edits, experiment planning, or
   recommendations about next steps, also read the relevant paper guidance:
@@ -82,3 +84,15 @@ Code and artifact discipline
 - Preserve provenance for any external command boundary: command, cwd,
   environment assumptions, stdout/stderr locations, return code, and input/output
   artifact paths.
+
+Project memory discipline
+-------------------------
+
+- Important run results, conclusions, artifact paths, and next-step decisions
+  must be saved in `docs/status/current_project_state.md`.
+- Significant executed workflows should be appended to `docs/status/run_log.md`
+  with date, command intent, output paths, key counts, and caveats.
+- Keep status documents lightweight and durable. Reference generated files under
+  `outputs/`, but do not commit heavy generated artifacts.
+- If an experiment result changes the research direction or active next step,
+  update the status documents in the same turn as the code or workflow change.

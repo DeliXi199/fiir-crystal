@@ -1,0 +1,25 @@
+{
+  "input": {
+    "audit_candidates_jsonl": "outputs/dpo_preferences/mace_relax_20260512_filtered/audit_candidates_f3_available.jsonl"
+  },
+  "output": {
+    "preference_dir": "outputs/dpo_preferences/mace_relax_20260512_rebuild_current_filtered/dpo_preferences_all_formula"
+  },
+  "condition": {
+    "mode": "csp",
+    "formula": null,
+    "spacegroup": null
+  },
+  "pairing": {
+    "same_formula_required": true,
+    "same_spacegroup_condition_required": true,
+    "require_raw_sequence": true,
+    "min_preference_margin": 0.000001,
+    "max_pairs": null
+  },
+  "boundary": {
+    "build_pairs_in_this_stage": true,
+    "train_dpo_in_this_stage": false,
+    "stability_preferences_require_offline_validation": true
+  }
+}
