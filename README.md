@@ -249,6 +249,18 @@ python scripts/run_local_mlip_validation.py \
   --output-dir outputs/mlip_validation_dry_run
 ```
 
+External CHGNet/MatGL execution is available through an opt-in runner outside
+the core package:
+
+```bash
+python scripts/run_mlip_offline_validation.py \
+  --mlip-kind chgnet \
+  --candidates-jsonl outputs/mlip_validation_mace_overnight_20260512_batch/selected_candidates.jsonl \
+  --output-dir outputs/mlip_validation_chgnet_smoke \
+  --limit 8 \
+  --dry-run
+```
+
 After a separate MLIP environment writes local result files, normalize them:
 
 ```bash

@@ -1,6 +1,6 @@
 # Current Project State
 
-Last updated: 2026-05-12, Asia/Shanghai.
+Last updated: 2026-05-13, Asia/Shanghai.
 
 This file is the compact project memory for future Codex sessions. Read it
 after `AGENTS.md` and before making roadmap, experiment, or implementation
@@ -13,10 +13,9 @@ decisions.
   active-loop simulation, and CrystalFormer DPO handoff boundary.
 - The repository should not run real DPO training, DFT, MLIP execution, or
   external model installation inside the core `fiir_crystal` package.
-- Current best next step: do not run more DPO on the 284-pair smoke set. Use
-  the completed before/after generation sanity artifacts to select candidates
-  for the same offline validation or expand the preference dataset before any
-  larger DPO run.
+- Current best next step: use the expanded 1024-candidate strict
+  MACE+CHGNet+MatGL consensus artifact for the next CrystalFormer DPO handoff
+  or smoke. Do not treat these labels as DFT or hull-confirmed stability.
 
 ## Important Guidance State
 
@@ -42,7 +41,7 @@ These are the currently important artifacts and counts.
   future training, although the current normal clone is sufficient for smoke and
   data handoff.
 
-### Existing CrystalFormer / MACE Evidence
+### Existing CrystalFormer / MLIP Evidence
 
 - A broad CrystalFormer audit corpus exists under:
   `outputs/crystalformer_bulk_real_smoke_perovskite_128_32x1600_shard_*`.
@@ -62,10 +61,142 @@ These are the currently important artifacts and counts.
   - calibration tier: `tier3_single_mlip`
   - caveat: F3 is a relaxation-threshold proxy, not DFT or hull-confirmed
     stability.
+- CHGNet single-point smoke evidence:
+  `outputs/mlip_validation_chgnet_smoke_20260512/normalized/validation_results.jsonl`
+  - normalized rows: 1
+  - unmatched candidate ids: 0
+  - F3 available candidates: 0
+  - source: `local_mlip_chgnet_single_point`
+  - calibration tier: `tier3_single_mlip`
+  - SLURM job: `98551`, `fiir-chgnet-smoke`, `COMPLETED`, exit code
+    `0:0`, elapsed `00:00:23`, node `gpu40904`
+  - caveat: this is a one-candidate smoke for the non-MACE runner, not a
+    production ensemble or hull workflow.
+- CHGNet single-point evidence aligned to the 320 MACE-relax candidates:
+  `outputs/mlip_validation_chgnet_mace_relax_aligned_20260512/normalized/validation_results.jsonl`
+  - normalized rows: 320
+  - unmatched candidate ids: 0
+  - F3 available candidates: 0
+  - source: `local_mlip_chgnet_single_point`
+  - SLURM job: `98567`, `fiir-chgnet-320`, `COMPLETED`, exit code `0:0`,
+    elapsed `00:00:11`, node `gpu40904`
+- CHGNet relaxation-derived evidence aligned to the 320 MACE-relax candidates:
+  `outputs/mlip_validation_chgnet_relax_mace_relax_aligned_20260512/normalized/validation_results.jsonl`
+  - normalized rows: 320
+  - unmatched candidate ids: 0
+  - F3 available candidates: 320
+  - source: `local_mlip_chgnet_relaxation`
+  - calibration tier: `tier3_single_mlip`
+  - SLURM job: `98588`, `fiir-chgnet-relax320`, `COMPLETED`, exit code
+    `0:0`, elapsed `00:01:07`, node `gpu40904`
+  - caveat: stderr reported CHGNet isolated-atom warnings for some structures;
+    this is still relaxation-threshold proxy evidence, not DFT or hull-confirmed
+    stability.
+- MACE+CHGNet relaxation consensus evidence:
+  `outputs/mlip_validation_ensemble_mace_chgnet_relax_20260512/normalized/validation_results.jsonl`
+  - normalized rows: 320
+  - unmatched candidate ids: 0
+  - F3 available candidates: 242
+  - stable consensus: 96
+  - unstable consensus: 146
+  - disagreement rows with `is_stable=null`: 78
+  - calibration policy: `tier2_mlip_ensemble` only when MACE and CHGNet
+    relaxation proxies agree; disagreement rows remain `tier3_mlip_disagreement`.
+  - agreement report:
+    `outputs/mlip_validation_ensemble_mace_chgnet_relax_20260512/report.md`
+- MatGL relaxation-derived evidence aligned to the same 320 MACE-relax
+  candidates:
+  `outputs/mlip_validation_matgl_relax_mace_relax_aligned_cuda_20260512/normalized/validation_results.jsonl`
+  - normalized rows: 320
+  - unmatched candidate ids: 0
+  - failed/incomplete rows: 0
+  - F3 available candidates: 320
+  - source: `local_mlip_matgl_relaxation`
+  - calibration tier: `tier3_single_mlip`
+  - model: `M3GNet-PES-MatPES-PBE-2025.2`
+  - SLURM job: `99042`, `fiir-matgl-relax320-cuda`, `COMPLETED`, exit
+    code `0:0`, elapsed `00:01:03`, node `gpu40904`
+  - caveat: first full MatGL relax attempt (`98645`) timed out after one hour
+    because MatGL stayed CPU-only; the runner now explicitly moves the loaded
+    potential to CUDA with `.to(actual_device)`.
+- MACE+CHGNet+MatGL relaxation consensus evidence:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_20260512/normalized/validation_results.jsonl`
+  - normalized rows: 320
+  - F3 available candidates: 194
+  - stable consensus: 85
+  - unstable consensus: 109
+  - disagreement rows with `is_stable=null`: 126
+  - all-three agreement rate: 0.60625
+  - pairwise agreement rates: MACE/CHGNet 0.75625, MACE/MatGL 0.721875,
+    CHGNet/MatGL 0.734375
+  - calibration policy: `tier2_mlip_ensemble` only when all three relaxation
+    proxies agree; disagreement rows remain `tier3_mlip_disagreement`.
+- Expanded 1024-candidate MACE+CHGNet+MatGL relaxation consensus evidence:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_1024_20260513/normalized/validation_results.jsonl`
+  - input batch:
+    `outputs/mlip_validation_three_mlip_1024_20260513_batch/selected_candidates.jsonl`
+  - batch shape: 1024 candidates, 64 formulas, 16 candidates/formula
+  - normalized rows: 1024
+  - formula mismatch count: 0
+  - unmatched candidate ids: 0
+  - single-model relax outputs:
+    - MACE:
+      `outputs/mlip_validation_mace_relax_1024_20260513/normalized/validation_results.jsonl`,
+      SLURM job `99186`, elapsed `00:04:08`
+    - CHGNet:
+      `outputs/mlip_validation_chgnet_relax_1024_20260513/normalized/validation_results.jsonl`,
+      SLURM job `99196`, elapsed `00:03:39`
+    - MatGL:
+      `outputs/mlip_validation_matgl_relax_1024_20260513/normalized/validation_results.jsonl`,
+      SLURM job `99200`, elapsed `00:05:14`
+  - all three single-model outputs normalized 1024/1024 with no failed or
+    incomplete rows
+  - F3 available candidates: 658
+  - stable consensus: 186
+  - unstable consensus: 472
+  - disagreement rows with `is_stable=null`: 366
+  - all-three agreement rate: 0.642578125
+  - pairwise agreement rates: MACE/CHGNet 0.76171875, MACE/MatGL
+    0.7490234375, CHGNet/MatGL 0.7744140625
+  - pairwise energy Pearson: MACE/CHGNet 0.8016007981667927, MACE/MatGL
+    0.8447657796203446, CHGNet/MatGL 0.7874871617358663
+  - calibration policy: `tier2_mlip_ensemble` only when all three relaxation
+    proxies agree; disagreement rows remain `tier3_mlip_disagreement`.
+- Generic non-MACE runner state:
+  - `scripts/run_mlip_offline_validation.py` supports `--mlip-kind chgnet`
+    and `--mlip-kind matgl` as external optional workflows.
+  - `scripts/slurm/run_mlip_offline_validation.slurm` runs the generic
+    workflow on a GPU node and normalizes outputs in place.
+  - `matgalaxy` has CHGNet, MatGL 3.0.3, torch, torch-geometric, pymatgen, and
+    ASE. DGL is not installed; MatGL is using the `PYG` backend.
+  - Real MatGL execution requires an explicit local
+    `FIIR_MLIP_MODEL_PATH`/`--model-path` to avoid implicit model downloads,
+    and the runner now gives MatGL a writable per-output `matgl_home`.
 
 ### Current DPO Preference Artifact
 
-The current best DPO preference artifact is:
+The current preferred strict three-MLIP consensus DPO preference artifact is:
+
+```text
+outputs/dpo_preferences/mace_chgnet_matgl_consensus_1024_20260513_import_rebuild/dpo_preferences/preference_pairs.jsonl
+```
+
+Summary:
+
+- input candidates: 1024
+- consensus F3-available candidates: 658
+- disagreement candidates excluded from F3 by `is_stable=null`: 366
+- preference pairs: 1040
+- stability-aware pairs: 1040
+- preference type: `stability_aware_offline_validation`
+- stability preferences: true
+- source validation:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_1024_20260513/normalized/validation_results.jsonl`
+- caveat: this is the expanded strict MLIP-proxy preference set, not DFT or
+  self-consistent hull-confirmed stability. Use it as the current best
+  production-scale preference source when precision is preferred.
+
+The current best production-scale single-MLIP DPO preference artifact is:
 
 ```text
 outputs/dpo_preferences/mace_relax_20260512_rebuild_current_filtered/dpo_preferences_all_formula/preference_pairs.jsonl
@@ -92,6 +223,45 @@ BaTiO3-oriented. For all-formula rebuilds, use:
 ```text
 configs/dpo_preference_builder.all_formula_mace_relax_20260512.json
 ```
+
+The current conservative two-MLIP consensus DPO preference artifact is:
+
+```text
+outputs/dpo_preferences/mace_chgnet_consensus_20260512_import_rebuild/dpo_preferences/preference_pairs.jsonl
+```
+
+Summary:
+
+- input candidates: 320
+- consensus F3-available candidates: 242
+- disagreement candidates excluded from F3 by `is_stable=null`: 78
+- preference pairs: 153
+- preference type: `stability_aware_offline_validation`
+- stability preferences: true
+- source validation:
+  `outputs/mlip_validation_ensemble_mace_chgnet_relax_20260512/normalized/validation_results.jsonl`
+- caveat: this is still MLIP relaxation proxy evidence, not DFT or
+  self-consistent hull-confirmed stability. Use it as the more conservative
+  alternative to the MACE-only 284-pair artifact.
+
+The previous 320-candidate strict three-MLIP consensus DPO preference artifact is:
+
+```text
+outputs/dpo_preferences/mace_chgnet_matgl_consensus_20260512_import_rebuild/dpo_preferences/preference_pairs.jsonl
+```
+
+Summary:
+
+- input candidates: 320
+- consensus F3-available candidates: 194
+- disagreement candidates excluded from F3 by `is_stable=null`: 126
+- preference pairs: 96
+- preference type: `stability_aware_offline_validation`
+- stability preferences: true
+- source validation:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_20260512/normalized/validation_results.jsonl`
+- caveat: this was the strictest MLIP-proxy preference set before the expanded
+  1024-candidate run.
 
 ### DPO Training Boundary
 

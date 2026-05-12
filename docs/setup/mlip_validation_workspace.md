@@ -61,6 +61,53 @@ The script writes:
 It does not import MLIP packages and does not run calculations. If
 `--run-mlip` is supplied today, the script exits with a clear boundary error.
 
+## External MLIP Runners
+
+MACE has a dedicated historical runner in
+`scripts/run_mace_offline_validation.py`. CHGNet and MatGL/M3GNet use the
+generic external runner:
+
+```bash
+python scripts/run_mlip_offline_validation.py \
+  --mlip-kind chgnet \
+  --candidates-jsonl outputs/mlip_validation_mace_overnight_20260512_batch/selected_candidates.jsonl \
+  --output-dir outputs/mlip_validation_chgnet_smoke \
+  --limit 8 \
+  --dry-run
+```
+
+Real CHGNet execution requires a separate environment with `chgnet`, `torch`,
+`pymatgen`, and `ase`:
+
+```bash
+python scripts/run_mlip_offline_validation.py \
+  --mlip-kind chgnet \
+  --candidates-jsonl outputs/mlip_validation_mace_overnight_20260512_batch/selected_candidates.jsonl \
+  --output-dir outputs/mlip_validation_chgnet_smoke \
+  --device cuda \
+  --limit 8
+```
+
+MatGL/M3GNet execution is supported by the same runner, but it intentionally
+requires an explicit local model path so FIIR does not trigger implicit model
+downloads:
+
+```bash
+python scripts/run_mlip_offline_validation.py \
+  --mlip-kind matgl \
+  --model-path /path/to/local/matgl_model \
+  --candidates-jsonl outputs/mlip_validation_mace_overnight_20260512_batch/selected_candidates.jsonl \
+  --output-dir outputs/mlip_validation_matgl_smoke \
+  --device cuda \
+  --limit 8
+```
+
+The generic runner writes `<kind>_validation_results.jsonl`,
+`<kind>_validation_summary.json`, and `report.md`. As with MACE, these rows are
+energy/force evidence only. They leave `energy_above_hull`, `formation_energy`,
+and `is_stable` null unless a separate local hull/reference workflow supplies
+that evidence.
+
 ## GPU Scheduling Plan
 
 Before launching real local MLIP calculations on SLURM, use the GPU planner to
@@ -221,3 +268,32 @@ against local reference phases. It leaves `energy_above_hull`, `formation_energy
 and `is_stable` as null. The output is MLIP energy/force evidence, not a stable
 F3 label. F3 remains unavailable until a local hull/reference workflow or other
 explicit offline validation evidence supplies `energy_above_hull` or `is_stable`.
+
+## Local CHGNet / MatGL SLURM Runner
+
+Use the generic SLURM wrapper for non-MACE MLIPs. It follows the same policy as
+the MACE wrapper: run on an allocated GPU node, write local raw rows, then
+normalize them in place.
+
+```bash
+env \
+  FIIR_CONDA_ENV=matgalaxy \
+  FIIR_MLIP_KIND=chgnet \
+  FIIR_MLIP_OUTPUT_DIR=outputs/mlip_validation_chgnet_smoke_8 \
+  FIIR_MLIP_CANDIDATES_JSONL=outputs/mlip_validation_mace_overnight_20260512_batch/selected_candidates.jsonl \
+  FIIR_MLIP_AUDIT_INDEX=outputs/mlip_validation_mace_overnight_20260512_batch/candidate_index.jsonl \
+  FIIR_MLIP_LIMIT=8 \
+  FIIR_MLIP_DEVICE=cuda \
+  python scripts/slurm/plan_slurm_job.py \
+    --kind gpu \
+    --accelerator cuda \
+    --job-name fiir-chgnet-smoke \
+    --account hmt03 \
+    --time 00:10:00 \
+    --submit-script scripts/slurm/run_mlip_offline_validation.slurm \
+    --output-json outputs/slurm_gpu_plans/chgnet_validation_smoke_submit_plan.json \
+    --run-sbatch
+```
+
+For MatGL, set `FIIR_MLIP_KIND=matgl` and provide
+`FIIR_MLIP_MODEL_PATH=/path/to/local/matgl_model`.
