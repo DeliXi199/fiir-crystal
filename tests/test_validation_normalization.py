@@ -142,6 +142,62 @@ def test_normalized_output_feeds_existing_offline_import_path(tmp_path) -> None:
     assert by_id["failed"]["validation_status"] == "validation_error"
 
 
+def test_relaxation_normalization_can_opt_into_f3_proxy_evidence(tmp_path) -> None:
+    source = tmp_path / "mace_relaxation.jsonl"
+    write_jsonl(
+        source,
+        [
+            {
+                "candidate_id": "relaxed_good",
+                "formula": "BaTiO3",
+                "validator": "mace_mpa_0",
+                "validation_source": "local_mlip_mace_relaxation",
+                "validation_status": "completed",
+                "calibration_tier": "tier3_mlip_relaxation",
+                "relaxed": True,
+                "relaxation_converged": True,
+                "force_max": 0.02,
+            },
+            {
+                "candidate_id": "relaxed_bad",
+                "formula": "BaTiO3",
+                "validator": "mace_mpa_0",
+                "validation_source": "local_mlip_mace_relaxation",
+                "validation_status": "completed",
+                "calibration_tier": "tier3_mlip_relaxation",
+                "relaxed": True,
+                "relaxation_converged": False,
+                "force_max": 0.2,
+            },
+        ],
+    )
+
+    result = main(
+        [
+            "--input",
+            str(source),
+            "--output-jsonl",
+            str(tmp_path / "normalized" / "validation_results.jsonl"),
+            "--output-summary",
+            str(tmp_path / "normalized" / "normalization_summary.json"),
+            "--report",
+            str(tmp_path / "normalized" / "report.md"),
+            "--derive-stability-from-relaxation",
+            "--relaxation-stability-force-max",
+            "0.05",
+        ]
+    )
+
+    rows = read_jsonl(result["files"]["normalized_validation_results"])
+    by_id = {row["candidate_id"]: row for row in rows}
+    assert result["summary"]["f3_available_candidate_count"] == 2
+    assert by_id["relaxed_good"]["is_stable"] is True
+    assert by_id["relaxed_bad"]["is_stable"] is False
+    assert by_id["relaxed_good"]["metadata"]["relaxation_stability_proxy"]["reason"] == (
+        "relaxation_converged_below_thresholds"
+    )
+
+
 def test_candidate_index_reports_unmatched_and_formula_mismatch(tmp_path) -> None:
     source = tmp_path / "validation.json"
     source.write_text(

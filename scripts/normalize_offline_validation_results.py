@@ -33,6 +33,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--report", default="outputs/offline_validation_normalized/report.md")
     parser.add_argument("--candidate-index")
+    parser.add_argument(
+        "--derive-stability-from-relaxation",
+        action="store_true",
+        help=(
+            "Opt in to deriving is_stable from MACE relaxation convergence and force/stress thresholds. "
+            "Default leaves F3 unavailable unless is_stable or e_above_hull is already present."
+        ),
+    )
+    parser.add_argument("--relaxation-stability-force-max", type=float, default=0.05)
+    parser.add_argument("--relaxation-stability-stress-max", type=float)
+    parser.add_argument("--relaxation-stability-allow-unconverged", action="store_true")
     parser.add_argument("--strict", action="store_true")
     return parser.parse_args(argv)
 
@@ -47,6 +58,10 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         report=Path(args.report),
         candidate_index=None if args.candidate_index is None else Path(args.candidate_index),
         strict=args.strict,
+        derive_stability_from_relaxation=args.derive_stability_from_relaxation,
+        relaxation_stability_force_max=args.relaxation_stability_force_max,
+        relaxation_stability_stress_max=args.relaxation_stability_stress_max,
+        relaxation_stability_require_converged=not args.relaxation_stability_allow_unconverged,
     )
     try:
         result = normalize_offline_validation_results(config)

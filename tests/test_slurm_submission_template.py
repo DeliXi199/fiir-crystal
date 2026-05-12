@@ -72,7 +72,10 @@ def test_crystalformer_gpu_submitter_uses_unified_gpu_policy() -> None:
     assert "--kind" in text
     assert '"gpu"' in text
     assert "FIIR_GPU_PARTITIONS" in text
-    assert "gpu4090_8" in text
+    assert 'DEFAULT_GPU_PARTITIONS="auto"' in text
+    assert "is_auto_partition_set" in text
+    assert "partition_filter=auto_all_cuda_compatible" in text
+    assert "partition_filter=explicit_allowlist" in text
     assert "FIIR_GPU_ACCELERATOR" in text
     assert "FIIR_GPU_PRECISION_PROFILE" in text
     assert "FIIR_MACE_RELAX" in text
@@ -93,10 +96,15 @@ def test_mace_slurm_template_uses_float64_by_default_for_relaxation() -> None:
     text = Path("scripts/slurm/run_mace_offline_validation.slurm").read_text(encoding="utf-8")
 
     assert 'FIIR_MACE_RELAX="${FIIR_MACE_RELAX:-0}"' in text
+    assert "FIIR_MACE_VALIDATION_SOURCE" in text
+    assert "local_mlip_mace_relaxation" in text
+    assert "FIIR_MACE_DERIVE_STABILITY_FROM_RELAXATION" in text
+    assert "--derive-stability-from-relaxation" in text
     assert 'if [[ -z "${FIIR_MACE_DEFAULT_DTYPE+x}" ]]; then' in text
     assert 'FIIR_MACE_DEFAULT_DTYPE="float64"' in text
     assert 'FIIR_MACE_DEFAULT_DTYPE="float32"' in text
     assert '--default-dtype "${FIIR_MACE_DEFAULT_DTYPE}"' in text
+    assert '--validation-source "${FIIR_MACE_VALIDATION_SOURCE}"' in text
 
 
 def test_unified_slurm_planner_cli_exists() -> None:
@@ -135,6 +143,15 @@ def test_slurm_readme_documents_cpu_load_oversubscription() -> None:
     assert "CPULoad" in text
     assert "CPUAlloc=64" in text
     assert "CPUTot=64" in text
+
+
+def test_slurm_readme_documents_auto_gpu_partition_selection() -> None:
+    text = Path("scripts/slurm/README.md").read_text(encoding="utf-8")
+
+    assert "FIIR_GPU_PARTITIONS=auto" in text
+    assert "currently available CUDA-compatible GPU nodes" in text
+    assert "Omit" in text
+    assert "resource-aware selection across all CUDA-compatible GPU" in text
 
 
 def test_slurm_logs_are_gitignored() -> None:

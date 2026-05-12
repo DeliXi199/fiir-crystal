@@ -30,6 +30,18 @@ FIIR_MACE_STRICT="${FIIR_MACE_STRICT:-0}"
 FIIR_MACE_RELAX="${FIIR_MACE_RELAX:-0}"
 FIIR_MACE_RELAX_STEPS="${FIIR_MACE_RELAX_STEPS:-100}"
 FIIR_MACE_FMAX="${FIIR_MACE_FMAX:-0.05}"
+FIIR_MACE_DERIVE_STABILITY_FROM_RELAXATION="${FIIR_MACE_DERIVE_STABILITY_FROM_RELAXATION:-0}"
+FIIR_MACE_RELAXATION_STABILITY_FORCE_MAX="${FIIR_MACE_RELAXATION_STABILITY_FORCE_MAX:-${FIIR_MACE_FMAX}}"
+FIIR_MACE_RELAXATION_STABILITY_STRESS_MAX="${FIIR_MACE_RELAXATION_STABILITY_STRESS_MAX:-}"
+FIIR_MACE_RELAXATION_STABILITY_ALLOW_UNCONVERGED="${FIIR_MACE_RELAXATION_STABILITY_ALLOW_UNCONVERGED:-0}"
+
+if [[ -z "${FIIR_MACE_VALIDATION_SOURCE+x}" ]]; then
+  if [[ "${FIIR_MACE_RELAX}" == "1" || "${FIIR_MACE_RELAX}" == "true" ]]; then
+    FIIR_MACE_VALIDATION_SOURCE="local_mlip_mace_relaxation"
+  else
+    FIIR_MACE_VALIDATION_SOURCE="local_mlip_mace_single_point"
+  fi
+fi
 
 if [[ -z "${FIIR_MACE_DEFAULT_DTYPE+x}" ]]; then
   if [[ "${FIIR_MACE_RELAX}" == "1" || "${FIIR_MACE_RELAX}" == "true" ]]; then
@@ -50,6 +62,8 @@ echo "  default_dtype=${FIIR_MACE_DEFAULT_DTYPE}"
 echo "  workers=${FIIR_MACE_WORKERS}"
 echo "  strict=${FIIR_MACE_STRICT}"
 echo "  relax=${FIIR_MACE_RELAX}"
+echo "  validation_source=${FIIR_MACE_VALIDATION_SOURCE}"
+echo "  derive_stability_from_relaxation=${FIIR_MACE_DERIVE_STABILITY_FROM_RELAXATION}"
 echo "  CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}"
 
 run_args=(
@@ -60,6 +74,7 @@ run_args=(
   --report "${FIIR_MACE_OUTPUT_DIR}/report.md" \
   --device "${FIIR_MACE_DEVICE}" \
   --default-dtype "${FIIR_MACE_DEFAULT_DTYPE}" \
+  --validation-source "${FIIR_MACE_VALIDATION_SOURCE}" \
   --limit "${FIIR_MACE_LIMIT}" \
   --workers "${FIIR_MACE_WORKERS}"
 )
@@ -85,6 +100,17 @@ normalize_args=(
 
 if [[ -n "${FIIR_MACE_AUDIT_INDEX}" ]]; then
   normalize_args+=(--candidate-index "${FIIR_MACE_AUDIT_INDEX}")
+fi
+
+if [[ "${FIIR_MACE_DERIVE_STABILITY_FROM_RELAXATION}" == "1" || "${FIIR_MACE_DERIVE_STABILITY_FROM_RELAXATION}" == "true" ]]; then
+  normalize_args+=(--derive-stability-from-relaxation)
+  normalize_args+=(--relaxation-stability-force-max "${FIIR_MACE_RELAXATION_STABILITY_FORCE_MAX}")
+  if [[ -n "${FIIR_MACE_RELAXATION_STABILITY_STRESS_MAX}" ]]; then
+    normalize_args+=(--relaxation-stability-stress-max "${FIIR_MACE_RELAXATION_STABILITY_STRESS_MAX}")
+  fi
+  if [[ "${FIIR_MACE_RELAXATION_STABILITY_ALLOW_UNCONVERGED}" == "1" || "${FIIR_MACE_RELAXATION_STABILITY_ALLOW_UNCONVERGED}" == "true" ]]; then
+    normalize_args+=(--relaxation-stability-allow-unconverged)
+  fi
 fi
 
 python "${normalize_args[@]}"

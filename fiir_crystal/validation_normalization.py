@@ -55,6 +55,10 @@ class ValidationNormalizationConfig:
     report: Path = Path("outputs/offline_validation_normalized/report.md")
     candidate_index: Path | None = None
     strict: bool = False
+    derive_stability_from_relaxation: bool = False
+    relaxation_stability_force_max: float = 0.05
+    relaxation_stability_stress_max: float | None = None
+    relaxation_stability_require_converged: bool = True
 
 
 def normalize_offline_validation_results(
@@ -80,6 +84,10 @@ def normalize_offline_validation_results(
                 raw_row,
                 input_path=input_path,
                 row_index=row_index,
+                derive_stability_from_relaxation=config.derive_stability_from_relaxation,
+                relaxation_stability_force_max=config.relaxation_stability_force_max,
+                relaxation_stability_stress_max=config.relaxation_stability_stress_max,
+                relaxation_stability_require_converged=config.relaxation_stability_require_converged,
             )
             issues.extend(row_issues)
             if normalized is None:
@@ -134,6 +142,10 @@ def normalize_offline_validation_results(
         "validation_status_breakdown": dict(sorted(status_counts.items())),
         "calibration_tier_breakdown": dict(sorted(calibration_counts.items())),
         "strict": config.strict,
+        "derive_stability_from_relaxation": config.derive_stability_from_relaxation,
+        "relaxation_stability_force_max": config.relaxation_stability_force_max,
+        "relaxation_stability_stress_max": config.relaxation_stability_stress_max,
+        "relaxation_stability_require_converged": config.relaxation_stability_require_converged,
     }
     files = write_normalization_outputs(config, rows, summary, issues, unmatched)
     return {
@@ -191,6 +203,10 @@ def normalize_validation_row(
     *,
     input_path: str | Path,
     row_index: int,
+    derive_stability_from_relaxation: bool = False,
+    relaxation_stability_force_max: float = 0.05,
+    relaxation_stability_stress_max: float | None = None,
+    relaxation_stability_require_converged: bool = True,
 ) -> tuple[dict[str, Any] | None, list[NormalizationIssue]]:
     """Normalize one validation row into the canonical local schema."""
 
@@ -247,14 +263,38 @@ def normalize_validation_row(
     if temperature is not None:
         generation["temperature"] = temperature
     generation = _clean_generation(generation)
+    is_stable = _optional_bool(row.get("is_stable"))
+    relaxation_proxy_reason: str | None = None
+    if is_stable is None and derive_stability_from_relaxation:
+        is_stable, relaxation_proxy_reason = _derive_stability_from_relaxation(
+            row,
+            force_max=force_max,
+            stress_max=stress_max,
+            force_threshold=relaxation_stability_force_max,
+            stress_threshold=relaxation_stability_stress_max,
+            require_converged=relaxation_stability_require_converged,
+        )
 
     metadata = _as_dict(row.get("metadata"))
     metadata.setdefault("normalization_source_path", str(input_path))
     metadata.setdefault("normalization_source_row_index", row_index)
     if "validator" not in metadata:
         metadata["validator"] = validator
+    if relaxation_proxy_reason is not None:
+        metadata["relaxation_stability_proxy"] = {
+            "enabled": True,
+            "source": "normalization_relaxation_thresholds",
+            "derived_is_stable": is_stable,
+            "reason": relaxation_proxy_reason,
+            "force_max": force_max,
+            "force_threshold": relaxation_stability_force_max,
+            "stress_max": stress_max,
+            "stress_threshold": relaxation_stability_stress_max,
+            "require_converged": relaxation_stability_require_converged,
+            "relaxation_converged": _optional_bool(row.get("relaxation_converged")),
+        }
     metadata["f3_available_after_normalization"] = _status_is_success(validation_status) and (
-        energy_above_hull is not None or _optional_bool(row.get("is_stable")) is not None
+        energy_above_hull is not None or is_stable is not None
     )
 
     normalized = {
@@ -284,7 +324,7 @@ def normalize_validation_row(
             "spacegroup": spacegroup,
             "generation": dict(generation),
         },
-        "is_stable": _optional_bool(row.get("is_stable")),
+        "is_stable": is_stable,
         "relaxed_structure_ref": _string_or_none(row.get("relaxed_structure_ref")),
         "error_reason": _string_or_none(_first(row, "error_reason", "error_message", "error")),
         "metadata": metadata,
@@ -343,6 +383,7 @@ def render_normalization_report(summary: dict[str, Any]) -> str:
         f"- validation_source_breakdown: {summary['validation_source_breakdown']}",
         f"- validation_status_breakdown: {summary['validation_status_breakdown']}",
         f"- calibration_tier_breakdown: {summary['calibration_tier_breakdown']}",
+        f"- derive_stability_from_relaxation: {summary.get('derive_stability_from_relaxation', False)}",
         "",
     ]
     return "\n".join(lines)
@@ -518,6 +559,35 @@ def _optional_bool(value: Any) -> bool | None:
     if lowered in {"false", "no", "0", "unstable", "fail", "failed"}:
         return False
     return None
+
+
+def _derive_stability_from_relaxation(
+    row: dict[str, Any],
+    *,
+    force_max: float | None,
+    stress_max: float | None,
+    force_threshold: float,
+    stress_threshold: float | None,
+    require_converged: bool,
+) -> tuple[bool | None, str | None]:
+    relaxed = _optional_bool(row.get("relaxed", row.get("structure_relaxed")))
+    metadata = _as_dict(row.get("metadata"))
+    relax_requested = _optional_bool(metadata.get("relax_requested"))
+    if relaxed is not True and relax_requested is not True:
+        return None, None
+    if force_max is None:
+        return None, "missing_force_max"
+
+    converged = _optional_bool(row.get("relaxation_converged", row.get("converged")))
+    if require_converged and converged is not True:
+        return False, "relaxation_not_converged"
+    if force_max > force_threshold:
+        return False, "force_above_relaxation_stability_threshold"
+    if stress_threshold is not None and stress_max is not None and stress_max > stress_threshold:
+        return False, "stress_above_relaxation_stability_threshold"
+    if stress_threshold is not None and stress_max is None:
+        return False, "missing_stress_max"
+    return True, "relaxation_converged_below_thresholds"
 
 
 def _normalize_status(value: Any) -> str:

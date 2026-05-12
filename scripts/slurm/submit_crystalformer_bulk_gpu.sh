@@ -1,12 +1,14 @@
 #!/bin/bash
 #
-# Policy-aware GPU submitter for CrystalFormer bulk jobs.
-# It delegates node planning to scripts/slurm/plan_slurm_job.py --kind gpu and
-# keeps generation opt-in through FIIR_RUN_GENERATION=1.
+# Policy-aware GPU submitter for FIIR GPU jobs.
+# It delegates node planning to scripts/slurm/plan_slurm_job.py --kind gpu.
+# CrystalFormer generation remains opt-in through FIIR_RUN_GENERATION=1, while
+# MACE and other GPU workflows can reuse this wrapper by setting
+# FIIR_SUBMIT_SCRIPT.
 
 set -eo pipefail
 
-DEFAULT_GPU_PARTITIONS="gpu4090_8"
+DEFAULT_GPU_PARTITIONS="auto"
 
 FIIR_SUBMIT_SCRIPT="${FIIR_SUBMIT_SCRIPT:-scripts/slurm/run_crystalformer_bulk_test.slurm}"
 FIIR_GPU_PARTITIONS="${FIIR_GPU_PARTITIONS:-${DEFAULT_GPU_PARTITIONS}}"
@@ -39,6 +41,12 @@ export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 normalize_partition_name() {
   local partition="$1"
   printf '%s\n' "${partition%\*}"
+}
+
+is_auto_partition_set() {
+  local value="${1,,}"
+  value="${value//[[:space:]]/}"
+  [[ -z "$value" || "$value" == "auto" || "$value" == "all" || "$value" == "*" ]]
 }
 
 require_integer() {
@@ -86,12 +94,14 @@ planner_args=(
   "$FIIR_GPU_PLAN_JSON"
 )
 
-for partition in ${FIIR_GPU_PARTITIONS//,/ }; do
-  normalized="$(normalize_partition_name "$partition")"
-  if [ -n "$normalized" ]; then
-    planner_args+=("--partition" "$normalized")
-  fi
-done
+if ! is_auto_partition_set "$FIIR_GPU_PARTITIONS"; then
+  for partition in ${FIIR_GPU_PARTITIONS//,/ }; do
+    normalized="$(normalize_partition_name "$partition")"
+    if [ -n "$normalized" ]; then
+      planner_args+=("--partition" "$normalized")
+    fi
+  done
+fi
 
 if [ -n "$FIIR_SLURM_ACCOUNT" ]; then
   planner_args+=("--account" "$FIIR_SLURM_ACCOUNT")
@@ -105,8 +115,13 @@ if [ "$FIIR_DRY_RUN" != "1" ] && [ "$FIIR_DRY_RUN" != "true" ]; then
   planner_args+=("--run-sbatch")
 fi
 
-echo "FIIR GPU CrystalFormer policy:"
+echo "FIIR GPU submission policy:"
 echo "  gpu_partitions=${FIIR_GPU_PARTITIONS}"
+if is_auto_partition_set "$FIIR_GPU_PARTITIONS"; then
+  echo "  partition_filter=auto_all_cuda_compatible"
+else
+  echo "  partition_filter=explicit_allowlist"
+fi
 echo "  accelerator=${FIIR_GPU_ACCELERATOR}"
 echo "  min_gpus=${FIIR_GPU_MIN_GPUS}"
 echo "  min_cpus=${FIIR_GPU_MIN_CPUS}"

@@ -83,7 +83,11 @@ bash scripts/slurm/submit_crystalformer_bulk_gpu.sh
 
 Useful GPU submitter overrides:
 
-- `FIIR_GPU_PARTITIONS`: comma- or space-separated GPU partitions, default `gpu4090_8`.
+- `FIIR_GPU_PARTITIONS`: comma- or space-separated GPU partitions. Default
+  `auto` means no partition allowlist is passed, so the planner scans all
+  currently available CUDA-compatible GPU nodes and chooses by free resources
+  and the active precision profile. Use an explicit value such as
+  `gpu4090_8` only when you intentionally want to restrict placement.
 - `FIIR_GPU_ACCELERATOR`: `cuda` or `any`, default `cuda`.
 - `FIIR_GPU_MIN_GPUS`, `FIIR_GPU_MIN_CPUS`, `FIIR_GPU_MIN_MEMORY_MB`: minimum remaining resources.
 - `FIIR_SLURM_ACCOUNT`: account passed to `sbatch`, default `hmt03`.
@@ -206,6 +210,11 @@ default ranking signals. It submits only when `--run-sbatch` is passed
 explicitly. The older `scripts/slurm/plan_gpu_job.py` entrypoint remains as a
 GPU-only compatibility wrapper.
 
+The GPU submit wrapper defaults to `FIIR_GPU_PARTITIONS=auto`, which means it
+does not restrict the planner to a fixed partition like `gpu4090_8`. Every GPU
+submission should therefore be selected from the current cluster state unless a
+caller deliberately provides a partition allowlist.
+
 Use `--precision-profile tf32` for CrystalFormer/JAX generation and fast MACE
 single-point screening. Use `--precision-profile fp64` for MACE geometry
 relaxation or other double-precision GPU work. The MACE submit path sets
@@ -234,7 +243,9 @@ try to take resources already allocated to other jobs.
 
 Useful options:
 
-- `--partition gpu4090_8`: restrict selection to one or more partitions.
+- `--partition gpu4090_8`: restrict selection to one or more partitions. Omit
+  this option for resource-aware selection across all CUDA-compatible GPU
+  partitions.
 - `--layout single-task`: one task receives all selected CPUs and GPUs.
 - `--layout one-task-per-gpu`: one task per free GPU, with CPU cores divided
   across tasks.
@@ -253,3 +264,59 @@ The planner exports these values into the SLURM job environment:
 - `FIIR_TOTAL_CPU_CORES`
 - `FIIR_GPU_MODEL`
 - `FIIR_GPU_GRES`
+
+## MACE Relaxation Evidence Loop
+
+After single-point MACE analysis has produced compact
+`relaxation_candidates.jsonl`, hydrate those candidate ids back to full
+structure records before submitting relaxation:
+
+```bash
+python scripts/hydrate_mace_relaxation_candidates.py \
+  --relaxation-candidates-jsonl outputs/mlip_validation_mace_overnight_20260512_analysis/relaxation_candidates.jsonl \
+  --candidate-jsonl outputs/mlip_validation_mace_overnight_20260512_batch/selected_candidates.jsonl \
+  --candidate-index-jsonl outputs/mlip_validation_mace_overnight_20260512_batch/candidate_index.jsonl \
+  --output-dir outputs/mlip_validation_mace_relax_20260512_input \
+  --strict
+```
+
+Submit the relaxation through SLURM by reusing the GPU policy wrapper with the
+MACE submit script. The explicit
+`FIIR_MACE_DERIVE_STABILITY_FROM_RELAXATION=1` opt-in tells normalization to
+convert relaxation convergence plus force/stress thresholds into local tier-3
+offline validation evidence. Leave it unset when a local hull or explicit
+`is_stable`/`e_above_hull` source will be provided separately.
+
+```bash
+FIIR_SUBMIT_SCRIPT=scripts/slurm/run_mace_offline_validation.slurm \
+FIIR_JOB_NAME=fiir-mace-relax-f3 \
+FIIR_CONDA_ENV=matgalaxy \
+FIIR_MACE_CANDIDATES_JSONL=outputs/mlip_validation_mace_relax_20260512_input/relaxation_candidates_full.jsonl \
+FIIR_MACE_AUDIT_INDEX=outputs/mlip_validation_mace_relax_20260512_input/candidate_index.jsonl \
+FIIR_MACE_OUTPUT_DIR=outputs/mlip_validation_mace_relax_20260512 \
+FIIR_MACE_LIMIT=320 \
+FIIR_MACE_RELAX=1 \
+FIIR_MACE_RELAX_STEPS=100 \
+FIIR_MACE_FMAX=0.05 \
+FIIR_MACE_DERIVE_STABILITY_FROM_RELAXATION=1 \
+FIIR_TIME_LIMIT=02:00:00 \
+FIIR_GPU_PRECISION_PROFILE=fp64 \
+bash scripts/slurm/submit_crystalformer_bulk_gpu.sh
+```
+
+After the SLURM job writes normalized validation rows, import them into audit
+records and rebuild the DPO artifact:
+
+```bash
+python scripts/import_offline_validation_and_build_dpo.py \
+  --validation-jsonl outputs/mlip_validation_mace_relax_20260512/normalized/validation_results.jsonl \
+  --audit-glob 'outputs/crystalformer_bulk_real_smoke_perovskite_128_32x1600_shard_*/smoke/crystalformer_audit/*/audit_candidates.jsonl' \
+  --output-dir outputs/dpo_preferences/mace_relax_20260512 \
+  --fail-on-zero-stability-pairs
+```
+
+For the 10x400 run, use:
+
+```bash
+--audit-glob 'outputs/crystalformer_bulk_real_smoke_perovskite_10x400/smoke/crystalformer_audit/*/audit_candidates.jsonl'
+```
