@@ -114,9 +114,26 @@ def test_prepare_dpo_smoke_run_cli(tmp_path) -> None:
             str(crystalformer),
             "--max-pairs",
             "1",
+            "--preference-artifact-label",
+            "strict_three_mlip_fixture",
+            "--input-candidate-count",
+            "2",
+            "--f3-available-candidate-count",
+            "1",
+            "--disagreement-candidate-count",
+            "1",
+            "--evidence-caveat",
+            "fixture labels are proxy evidence",
         ]
     )
 
     assert result["manifest"]["input_pair_count"] == 2
     assert result["manifest"]["prepared_pair_count"] == 1
+    assert result["manifest"]["evidence_context"]["preference_artifact_label"] == "strict_three_mlip_fixture"
+    assert result["manifest"]["evidence_context"]["input_candidate_count"] == 2
+    assert result["manifest"]["evidence_context"]["f3_available_candidate_count"] == 1
+    assert result["manifest"]["evidence_context"]["disagreement_candidate_count"] == 1
+    assert result["manifest"]["evidence_context"]["caveat"] == "fixture labels are proxy evidence"
+    assert "MatGL" in result["manifest"]["not_core_dependencies"]
     assert (output_dir / "dpo_smoke_manifest.json").exists()
+    assert (output_dir / "before_after_validation_plan.md").exists()

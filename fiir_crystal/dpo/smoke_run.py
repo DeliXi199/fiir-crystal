@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import ast
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Sequence
 
+from fiir_crystal.dpo.evidence import DpoEvidenceContext
 from fiir_crystal.dpo.training_boundary import validate_preference_pairs_for_training
 from fiir_crystal.io import read_jsonl, write_json, write_jsonl
 
@@ -54,6 +55,7 @@ class CrystalFormerDpoSmokeRunConfig:
     optimizer: str = "adam"
     num_io_process: int = 1
     max_pairs: int | None = None
+    evidence_context: DpoEvidenceContext = field(default_factory=DpoEvidenceContext)
 
 
 def prepare_crystalformer_dpo_smoke_run(
@@ -77,6 +79,7 @@ def prepare_crystalformer_dpo_smoke_run(
     manifest_path = config.output_dir / "dpo_smoke_manifest.json"
     report_path = config.output_dir / "report.md"
     run_script_path = config.output_dir / "run_training.sh"
+    evaluation_plan_path = config.output_dir / "before_after_validation_plan.md"
 
     chosen_rows, rejected_rows, index_rows = _sequence_rows(pairs)
     write_jsonl(chosen_path, chosen_rows)
@@ -91,11 +94,13 @@ def prepare_crystalformer_dpo_smoke_run(
         "run_name": config.run_name,
         "runs_training": False,
         "non_overwrite": True,
+        "not_core_dependencies": ["CrystalFormer", "JAX", "torch", "pymatgen", "ASE", "MACE", "CHGNet", "MatGL"],
         "base_checkpoint_dir": str(config.base_checkpoint_dir),
         "training_output_root": str(_training_output_root(config)),
         "crystalformer_work_dir": str(config.crystalformer_work_dir),
         "preference_pairs_jsonl": str(config.preference_pairs_jsonl),
         "preference_pairs_sha256": sha256(config.preference_pairs_jsonl.read_bytes()).hexdigest(),
+        "evidence_context": config.evidence_context.to_dict(),
         "input_pair_count": pair_summary.input_pair_count,
         "prepared_pair_count": len(pairs),
         "checkpoint_start_epoch": start_epoch,
@@ -126,11 +131,19 @@ def prepare_crystalformer_dpo_smoke_run(
             "Generate before and after samples with identical formulas, seeds, K/top-k, temperature, and sample counts.",
             "Run the same FIIR audit, offline validation import, and reporting on both outputs.",
         ],
+        "matched_before_after_validation_gate": [
+            "Do not interpret DPO loss or checkpoint creation as model improvement.",
+            "Use matched before/after generation with identical formulas, seed, sampling parameters, and candidate count.",
+            "Start with 10 formulas x 20 samples as a sanity gate, then scale to 64 formulas x 20 or 64 formulas x 40.",
+            "Import offline MACE+CHGNet+MatGL relaxation consensus evidence before comparing performance.",
+            "Report counts, F1/F2/F3 availability, strict consensus stable/unstable/disagreement, agreement rates, diversity, coverage, preference-pair yield, and reward-hacking or proxy-divergence signals.",
+        ],
     }
     write_json(manifest_path, manifest)
     run_script_path.write_text(_run_script(command, config.crystalformer_work_dir), encoding="utf-8")
     run_script_path.chmod(0o755)
     report_path.write_text(render_dpo_smoke_run_report(manifest), encoding="utf-8")
+    evaluation_plan_path.write_text(render_before_after_validation_plan(manifest), encoding="utf-8")
 
     return {
         "manifest": manifest,
@@ -138,6 +151,7 @@ def prepare_crystalformer_dpo_smoke_run(
             "manifest": str(manifest_path),
             "report": str(report_path),
             "run_script": str(run_script_path),
+            "evaluation_plan": str(evaluation_plan_path),
             "chosen_sequences": str(chosen_path),
             "rejected_sequences": str(rejected_path),
             "pair_index": str(pair_index_path),
@@ -148,11 +162,13 @@ def prepare_crystalformer_dpo_smoke_run(
 def render_dpo_smoke_run_report(manifest: dict[str, Any]) -> str:
     """Render a concise report for the prepared DPO smoke run."""
 
+    evidence = manifest["evidence_context"]
     lines = [
         "# CrystalFormer DPO Smoke Run",
         "",
         "## Safety",
         "- This preparation step did not run training.",
+        "- CrystalFormer, JAX, torch, pymatgen, ASE, MACE, CHGNet, and MatGL remain outside core dependencies.",
         "- The before checkpoint is used only through `--restore_path`.",
         "- The after checkpoint will be written under a separate `--folder` output root.",
         "",
@@ -160,6 +176,14 @@ def render_dpo_smoke_run_report(manifest: dict[str, Any]) -> str:
         f"- preference_pairs_jsonl: `{manifest['preference_pairs_jsonl']}`",
         f"- prepared_pair_count: {manifest['prepared_pair_count']}",
         f"- base_checkpoint_dir: `{manifest['base_checkpoint_dir']}`",
+        "",
+        "## Evidence Context",
+        f"- preference_artifact_label: {evidence.get('preference_artifact_label')}",
+        f"- source_validation_jsonl: `{evidence.get('source_validation_jsonl')}`",
+        f"- input_candidate_count: {evidence.get('input_candidate_count')}",
+        f"- f3_available_candidate_count: {evidence.get('f3_available_candidate_count')}",
+        f"- disagreement_candidate_count: {evidence.get('disagreement_candidate_count')}",
+        f"- caveat: {evidence.get('caveat')}",
         "",
         "## Outputs",
         f"- training_output_root: `{manifest['training_output_root']}`",
@@ -174,6 +198,62 @@ def render_dpo_smoke_run_report(manifest: dict[str, Any]) -> str:
         "```",
         "",
     ]
+    return "\n".join(lines)
+
+
+def render_before_after_validation_plan(manifest: dict[str, Any]) -> str:
+    """Render the matched before/after validation gate for a prepared smoke run."""
+
+    evidence = manifest["evidence_context"]
+    metrics = [
+        "before/after candidate count",
+        "DPO eligible count",
+        "F1 fail rate",
+        "F2 fail rate",
+        "F3 available count",
+        "strict three-MLIP stable consensus count",
+        "unstable consensus count",
+        "disagreement count",
+        "all-three agreement rate",
+        "pairwise agreement rate",
+        "stable consensus rate",
+        "diversity or collapse signal",
+        "composition/formula coverage",
+        "prototype or structural coverage",
+        "preference-pair yield",
+        "reward hacking or proxy divergence signals",
+    ]
+    lines = [
+        "# Matched Before/After Validation Gate",
+        "",
+        "## Scope",
+        "- This smoke package prepares an external CrystalFormer DPO command; it does not prove model improvement.",
+        "- Use the base checkpoint as before and the smoke-produced checkpoint as after only if the SLURM smoke completes.",
+        "- Keep formulas, seed, sampling parameters, and candidate count identical between before and after.",
+        "",
+        "## Evidence Caveat",
+        f"- preference_artifact_label: {evidence.get('preference_artifact_label')}",
+        f"- source_validation_jsonl: `{evidence.get('source_validation_jsonl')}`",
+        f"- caveat: {evidence.get('caveat')}",
+        "",
+        "## Recommended Gates",
+        "- Stage 1 sanity: 10 formulas x 20 samples.",
+        "- Stage 2 statistical expansion: 64 formulas x 20 or 64 formulas x 40 samples.",
+        "- Treat F1/F2 generation sanity as structural QA only; do not report it as final DPO performance evidence.",
+        "- Import MACE+CHGNet+MatGL relaxation consensus F3 proxy evidence before making before/after claims.",
+        "",
+        "## Required Metrics",
+    ]
+    lines.extend(f"- {metric}" for metric in metrics)
+    lines.extend(
+        [
+            "",
+            "## Guardrails",
+            "- Do not run generation, MLIP validation, DFT, or long evaluation on the login node.",
+            "- Submit generation and offline validation through the project SLURM wrappers.",
+            "- Record command intent, cwd, environment assumptions, job id, exit code, elapsed time, node, stdout/stderr, artifact paths, checkpoint hashes, and caveats for any real external boundary.",
+        ]
+    )
     return "\n".join(lines)
 
 

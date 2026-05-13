@@ -13,9 +13,12 @@ decisions.
   active-loop simulation, and CrystalFormer DPO handoff boundary.
 - The repository should not run real DPO training, DFT, MLIP execution, or
   external model installation inside the core `fiir_crystal` package.
-- Current best next step: use the expanded 1024-candidate strict
-  MACE+CHGNet+MatGL consensus artifact for the next CrystalFormer DPO handoff
-  or smoke. Do not treat these labels as DFT or hull-confirmed stability.
+- Current best next step is to wait for the submitted 64 formulas x 20 samples
+  matched before/after CrystalFormer generation jobs to complete, then inspect
+  the four `bulk_summary.json` files and prepare matched MACE+CHGNet+MatGL
+  offline validation import. The completed 10 formulas x 20 samples smoke
+  already has imported MACE+CHGNet+MatGL relaxation consensus F3 proxy
+  evidence. Do not treat these labels as DFT or hull-confirmed stability.
 
 ## Important Guidance State
 
@@ -28,6 +31,53 @@ decisions.
   - `docs/guidance/04_paper3_discovery_pipeline.md`
 - Failure schema now includes optional F4 novelty leakage and F5
   synthesizability fields, while FSAL/DPO pair mining remains focused on F1-F3.
+- End-of-task operating rule: after each durable task, inspect whether the
+  scoped code/config/status changes should be committed and pushed to GitHub.
+  Push only when the worktree can be scoped cleanly without large generated
+  artifacts or unrelated user changes; otherwise record why upload is deferred.
+
+## SLURM GPU Scheduling Policy
+
+- GPU submissions should use `scripts/slurm/submit_crystalformer_bulk_gpu.sh`
+  or `scripts/slurm/plan_slurm_job.py --kind gpu` before direct `sbatch`.
+- After submitting a SLURM job that needs more than a brief startup window,
+  monitor startup only, then use the waiting time for safe lightweight work
+  such as documentation, manifests, schema checks, dry-runs, focused tests, or
+  runbook preparation. Return later to inspect `squeue`/`sacct`, logs, and
+  artifacts.
+- `FIIR_GPU_QUEUE_MODE=auto` is the default GPU placement policy. Auto first
+  uses the original resource-aware pinned strategy: pick the best currently
+  free eligible GPU node and submit with `--nodelist`. It falls back to
+  flexible multi-partition queueing only when no eligible long-running GPU node
+  has enough free resources.
+- Flexible GPU queueing records the candidate partition set and intentionally
+  does not use `--nodelist`; it requests the minimum required GPUs/CPUs and
+  leaves final node assignment to SLURM runtime.
+- For larger GPU work, set `FIIR_GPU_MIN_GPUS` / `--min-gpus` to the GPU count
+  the job should actually use. Flexible mode still requests GPUs with `--gres`
+  and must not be used as a CPU-only placement shortcut.
+- For larger CrystalFormer generation, MLIP validation, DPO smoke/evaluation,
+  and similar GPU compute jobs, request the full GPU count of the target node
+  class whenever the candidate partitions are homogeneous enough to do so. For
+  the current long-running CUDA GPU partitions used by FIIR, this generally
+  means `FIIR_GPU_MIN_GPUS=8`.
+- General resource-use rule: every SLURM job must request and actually use the
+  full compute-resource shape of its target node or homogeneous partition set.
+  This applies to all submitted jobs, including smoke, debug, validation,
+  generation, training, and evaluation jobs. Match the SLURM request with
+  task-level concurrency so allocated CPUs, GPUs, and nodes are used rather
+  than left idle. If a workflow cannot use the full node shape, reshape the
+  task, choose a matching partition, or keep it local only if it is lightweight
+  and allowed by the login-node policy.
+- The `test` partition is considered CUDA-compatible GPU capacity and remains
+  in the same resource-aware ranking as other GPU partitions. It is not
+  preferred simply because a job is small; larger available GPU resources still
+  win by the normal score.
+- The extra `test` rule is only a time guard: if no GPU time limit is provided,
+  or if the requested time exceeds 30 minutes, the planner skips `test` even
+  when it has idle GPUs.
+- Use `FIIR_TIME_LIMIT=00:30:00` or `--time 00:30:00` when deliberately routing
+  a short GPU sanity job to `test`.
 
 ## Latest Durable Results
 
@@ -268,23 +318,324 @@ Summary:
 The current handoff artifact is:
 
 ```text
-outputs/crystalformer_dpo_training_boundary/mace_relax_20260512_rebuild_current_filtered/trainer_manifest.json
+outputs/crystalformer_dpo_training_boundary/mace_chgnet_matgl_consensus_1024_20260513/trainer_manifest.json
 ```
 
 Summary:
 
 - ready for external training: true
-- input pairs: 284
-- valid pairs: 284
+- input pairs: 1040
+- valid pairs: 1040
 - invalid pairs: 0
-- stability-aware pair count: 284
+- stability-aware pair count: 1040
 - train DPO in FIIR: false
+- preference source:
+  `outputs/dpo_preferences/mace_chgnet_matgl_consensus_1024_20260513_import_rebuild/dpo_preferences/preference_pairs.jsonl`
+- evidence context:
+  - input candidates: 1024
+  - strict consensus F3-available candidates: 658
+  - disagreement candidates excluded from F3: 366
+  - source validation:
+    `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_1024_20260513/normalized/validation_results.jsonl`
+- caveat: the 1024 strict MACE+CHGNet+MatGL consensus labels are MLIP
+  relaxation proxy evidence, not DFT evidence and not self-consistent
+  hull-confirmed stability.
 - warning: CrystalFormer is a normal clone; fork/submodule is recommended for
   future training work.
 
-### Completed Non-Overwriting DPO Smoke Run
+### Completed 1024 Strict-Consensus DPO Smoke Run
 
 The current DPO smoke package is:
+
+```text
+outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare/dpo_smoke_manifest.json
+```
+
+Summary:
+
+- FIIR core still does not implement DPO training; the prepared external
+  CrystalFormer smoke was run through SLURM on a GPU compute node with JAX GPU
+  preflight enabled.
+- prepared pairs: 1040
+- chosen/rejected raw-sequence JSONL rows: 1040 / 1040
+- before checkpoint: `external/checkpoints/crystalformer/alex20s_csp`
+- checkpoint start epoch: 46000
+- checkpoint target epoch: 46001
+- after checkpoint output root:
+  `outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare/after_checkpoint/`
+- produced after checkpoint:
+  `outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare/after_checkpoint/beta_0.1_label_0_gamma_0_adam_bs_32_lr_1e-05_decay_0_clip_1_A_119_W_28_N_21_Nf_5_Kx_16_Kl_4_h0_256_l_16_H_8_k_32_m_256_e_256_drop_0.1/epoch_046001.pkl`
+- after checkpoint size: 159M
+- after checkpoint sha256:
+  `f22dd30a4ae53ed3c6f8dbc485ee25c1177e40fbaeaf62682d1aabdfc4265aa1`
+- run script:
+  `outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare/run_training.sh`
+- SLURM execution provenance:
+  `outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare/slurm_execution_provenance.json`
+- matched before/after validation plan:
+  `outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare/before_after_validation_plan.md`
+- non-overwrite guard: the after output root is separate from the before
+  checkpoint directory, and this package uses a new output directory separate
+  from the older MACE-only smoke package.
+- SLURM job: `99443`, `fiir-cf-dpo-1024smoke`, `COMPLETED`, exit code `0:0`,
+  elapsed `00:03:08`, node `gpu40902`.
+- SLURM logs:
+  - `logs/slurm/fiir-cf-dpo-1024smoke_99443.log`
+  - `logs/slurm/fiir-cf-dpo-1024smoke_99443.err`
+- GPU evidence:
+  - requested GRES: `gpu:rtx4090:8`
+  - `CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7`
+  - `FIIR_TOTAL_GPUS=8`
+  - `jax_default_backend=gpu`
+  - `jax_devices`: `CudaDevice(id=0)` through `CudaDevice(id=7)`
+- smoke training row in `data.txt`:
+  - epoch: 46001
+  - loss / dpo_loss: 1281.960815 / 1281.960815
+  - val loss / val dpo_loss: 307.132141 / 307.132141
+- stderr contained XLA GPU autotuning warnings only in the inspected tail; no
+  traceback, `Error`, `Exception`, or CPU-only JAX failure marker was found.
+- caveat: the 1024 strict MACE+CHGNet+MatGL consensus labels are MLIP
+  relaxation proxy evidence, not DFT evidence and not self-consistent
+  hull-confirmed stability. The checkpoint is only a pipeline artifact until
+  matched before/after offline validation is imported.
+
+### Completed 1024 Strict-Consensus Before/After Generation Sanity
+
+Matched before/after generation configs were prepared, validate-only checks
+passed, and the 10 formulas x 20 samples sanity generation was run through the
+GPU SLURM wrapper on the `test` partition:
+
+- before config:
+  `configs/generated/dpo_strict3mlip_1024_before_after/before_10x20_seed20260513.json`
+- after config:
+  `configs/generated/dpo_strict3mlip_1024_before_after/after_10x20_seed20260513.json`
+- scope: 10 formulas x 20 samples for before and after
+- seed: 20260513
+- sampling: `K=40`, `top_p=1.0`, `temperature=1.0`
+- before checkpoint: `external/checkpoints/crystalformer/alex20s_csp`
+- after checkpoint:
+  `outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare/after_checkpoint/beta_0.1_label_0_gamma_0_adam_bs_32_lr_1e-05_decay_0_clip_1_A_119_W_28_N_21_Nf_5_Kx_16_Kl_4_h0_256_l_16_H_8_k_32_m_256_e_256_drop_0.1`
+- before output root:
+  `outputs/dpo_strict3mlip_1024_before_after/before_10x20_seed20260513/`
+- after output root:
+  `outputs/dpo_strict3mlip_1024_before_after/after_10x20_seed20260513/`
+- validate-only summaries:
+  - `outputs/dpo_strict3mlip_1024_before_after/before_10x20_seed20260513/bulk_validation_summary.json`
+  - `outputs/dpo_strict3mlip_1024_before_after/after_10x20_seed20260513/bulk_validation_summary.json`
+- ready_for_generation: true for both before and after
+- blocking reasons / warnings: none for both before and after
+- generation SLURM jobs:
+  - before: job `99459`, `fiir-dpo1024-before-test`, partition `test`, node
+    `test001`, `COMPLETED`, exit `0:0`, elapsed `00:09:54`
+  - after: job `99467`, `fiir-dpo1024-after-test`, partition `test`, node
+    `test001`, `COMPLETED`, exit `0:0`, elapsed `00:04:59`
+- generation logs:
+  - `logs/slurm/fiir-dpo1024-before-test_99459.log`
+  - `logs/slurm/fiir-dpo1024-before-test_99459.err`
+  - `logs/slurm/fiir-dpo1024-after-test_99467.log`
+  - `logs/slurm/fiir-dpo1024-after-test_99467.err`
+- GPU evidence:
+  - before: `jax_default_backend=gpu`, JAX saw two CUDA devices, wrapper
+    worker devices were `0` because the first `sbatch --export` path preserved
+    only the first comma-separated value
+  - after: `jax_default_backend=gpu`, JAX saw two CUDA devices, wrapper worker
+    devices were `0,1`
+  - both stderr files were empty, and no traceback / error / CPU-only GPU
+    preflight marker was found in the inspected SLURM logs
+- before summary:
+  - completed formulas: 10 / 10
+  - candidates: 200
+  - DPO eligible candidates: 200
+  - F1 fail count / rate: 7 / 0.035
+  - F2 fail count / rate: 0 / 0.0
+  - F3 available / unknown: 0 / 200
+  - generated preference pairs: 130
+- after summary:
+  - completed formulas: 10 / 10
+  - candidates: 200
+  - DPO eligible candidates: 200
+  - F1 fail count / rate: 3 / 0.015
+  - F2 fail count / rate: 0 / 0.0
+  - F3 available / unknown: 0 / 200
+  - generated preference pairs: 76
+- comparison summary/report:
+  - `outputs/dpo_strict3mlip_1024_before_after/comparison_10x20_seed20260513/summary.json`
+  - `outputs/dpo_strict3mlip_1024_before_after/comparison_10x20_seed20260513/report.md`
+- read-only strict QA artifacts:
+  - combined:
+    `outputs/dpo_strict3mlip_1024_before_after/qa_before_after_10x20_seed20260513/qa_summary.json`
+  - before:
+    `outputs/dpo_strict3mlip_1024_before_after/qa_before_10x20_seed20260513/qa_summary.json`
+  - after:
+    `outputs/dpo_strict3mlip_1024_before_after/qa_after_10x20_seed20260513/qa_summary.json`
+- strict QA caveat: `ready` is false because 6 formulas per side produced zero
+  generated preference-pair artifacts, and the combined before/after scan also
+  flags duplicate candidate ids across matched roots. Candidate generation did
+  complete and parse as full structures, so this is a generation sanity artifact
+  awaiting offline validation import rather than a performance result.
+- caveat: generation sanity F1/F2 results and generated preference-pair yield
+  are not DPO performance evidence. Import offline MACE+CHGNet+MatGL relaxation
+  consensus F3 proxy evidence before making before/after claims. The 1024
+  strict-consensus labels remain MLIP relaxation proxy evidence, not DFT and not
+  self-consistent hull-confirmed stability.
+
+### Completed 1024 Strict-Consensus Before/After Offline Validation
+
+Matched before/after MACE+CHGNet+MatGL relaxation validation has been submitted
+through SLURM for the completed 10 formulas x 20 samples generation roots, and
+the local strict three-MLIP consensus import/comparison has completed. This is a
+small smoke-scale proxy audit, not a production-scale performance result:
+
+- provenance/runbook directory:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_10x20_seed20260513/`
+- partial manifest:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_10x20_seed20260513/run_manifest_partial.json`
+- final manifest:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_10x20_seed20260513/run_manifest_final.json`
+- readiness summary:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_10x20_seed20260513/readiness_summary.json`
+- runbook:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_10x20_seed20260513/README.md`
+- candidate validation batches:
+  - before:
+    `outputs/mlip_validation_dpo_strict3mlip_1024_before_after_20260513_batch/before/selected_candidates.jsonl`
+  - after:
+    `outputs/mlip_validation_dpo_strict3mlip_1024_before_after_20260513_batch/after/selected_candidates.jsonl`
+- batch counts: 200 selected/indexed candidates for before and 200
+  selected/indexed candidates for after
+- candidate IDs were prefixed as `before__` and `after__` to avoid
+  before/after ID collisions during offline validation import.
+- initial jobs `101119`-`101122` were cancelled before running because the
+  initial `gpu4090` target was not usable for these submissions; they produced
+  no validation outputs.
+- current SLURM validation jobs:
+  - MACE before: job `101126`, `test`, `test001`, `COMPLETED`, exit `0:0`,
+    elapsed `00:04:04`, normalized rows 200
+  - MACE after: job `101127`, `test`, `test001`, `COMPLETED`, exit `0:0`,
+    elapsed `00:02:57`, normalized rows 200
+  - CHGNet before: job `101128`, `test`, `test001`, `COMPLETED`, exit `0:0`,
+    elapsed `00:02:59`, normalized rows 200
+  - CHGNet after: job `101129`, `test`, `test001`, `COMPLETED`, exit `0:0`,
+    elapsed `00:09:47`, normalized rows 200
+  - MatGL before: job `101130`, `test`, `test001`, `COMPLETED`, exit `0:0`,
+    elapsed `00:12:35`, normalized rows 200
+  - MatGL after: job `101131`, `test`, `test001`, `COMPLETED`, exit `0:0`,
+    elapsed `00:09:38`, normalized rows 200
+- scheduler policy: `test` is GPU-capable but has a 30-minute time guard and
+  remains part of normal resource-based GPU ranking; it is not a special
+  "small task preferred" partition.
+- all submitted validation jobs requested `gpu:rtx4090:2` on SLURM and were
+  launched through existing SLURM wrappers, not local login-node MLIP runs.
+- local import scripts:
+  - `scripts/check_dpo_offline_validation_ready.py`
+  - `scripts/build_mlip_ensemble_consensus.py`
+  - `scripts/compare_dpo_before_after_mlip_consensus.py`
+- readiness gate: passed; all six normalized validator JSONL files exist and
+  have the expected 200-row matched coverage.
+- consensus artifacts:
+  - before:
+    `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_dpo_strict3mlip_1024_before_20260513/`
+  - after:
+    `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_dpo_strict3mlip_1024_after_20260513/`
+- final matched comparison:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_comparison_10x20_seed20260513/`
+- imported comparison counts:
+  - before: 200 candidates, 200 DPO eligible, F1 fail rate 0.035, F2 fail rate
+    0.0, F3 available 125, stable consensus 52, unstable consensus 73,
+    disagreement 75, all-three agreement rate 0.625, stable consensus rate
+    0.26, preference-pair yield 130
+  - after: 200 candidates, 200 DPO eligible, F1 fail rate 0.015, F2 fail rate
+    0.0, F3 available 130, stable consensus 58, unstable consensus 72,
+    disagreement 70, all-three agreement rate 0.65, stable consensus rate
+    0.29, preference-pair yield 76
+  - deltas: stable consensus +6, stable consensus rate +0.03, F3 available +5,
+    all-three agreement rate +0.025, disagreement -5, F1 fail rate -0.02,
+    preference-pair yield -54
+  - diversity/collapse smoke signal: formula coverage remained 10 formulas x
+    20 samples, unique sequence fraction remained 1.0, spacegroup count
+    remained 46, spacegroup entropy changed from 3.68908 to 3.69188
+  - proxy-divergence screen: no flag in the small 10x20 report
+- caveat: these labels are MLIP relaxation proxy evidence, not DFT evidence and
+  not self-consistent hull-confirmed stability. The apparent proxy improvement
+  is small-smoke evidence only and should be followed by a larger matched
+  64-formula audit before any performance claim.
+
+### Submitted 64-Formula Before/After Generation Gate
+
+The next larger matched before/after generation gate has been submitted through
+the project GPU SLURM wrapper and is waiting for GPU resources:
+
+- submission manifest:
+  `outputs/dpo_strict3mlip_1024_before_after/generation_64x20_seed20260513_submission_20260513/submission_manifest.json`
+- submission runbook:
+  `outputs/dpo_strict3mlip_1024_before_after/generation_64x20_seed20260513_submission_20260513/README.md`
+- earlier defer marker:
+  `outputs/dpo_strict3mlip_1024_before_after/deferred_64x20_gpu_resources_20260513/defer_marker.json`
+- earlier defer runbook:
+  `outputs/dpo_strict3mlip_1024_before_after/deferred_64x20_gpu_resources_20260513/README.md`
+- target: 64 formulas x 20 samples, matched before/after
+- formula bank:
+  `configs/generated/dpo_strict3mlip_1024_before_after/perovskite_first64_formula_bank_seed20260513.json`
+- before configs:
+  `configs/generated/dpo_strict3mlip_1024_before_after/before_64x20_seed20260513_shards/shard_001.json`
+  and
+  `configs/generated/dpo_strict3mlip_1024_before_after/before_64x20_seed20260513_shards/shard_002.json`
+- after configs:
+  `configs/generated/dpo_strict3mlip_1024_before_after/after_64x20_seed20260513_shards/shard_001.json`
+  and
+  `configs/generated/dpo_strict3mlip_1024_before_after/after_64x20_seed20260513_shards/shard_002.json`
+- validate-only status: all four shard configs passed local lightweight
+  validate-only checks with 32 formulas and 640 requested samples per shard.
+- initial bad submissions:
+  - jobs `101184` and `101185` were cancelled because the automatic pinned
+    choice used the known-unusable `gpu4090` partition for this workflow
+    (`PartitionConfig` / unusable node reason).
+  - jobs `101187`, `101188`, `101190`, and `101191` were cancelled before
+    running because they requested only `gpu:1`; they were replaced with
+    whole-node GPU requests.
+  - jobs `101197`, `101198`, `101200`, and `101201` were cancelled before
+    running because they requested 8 GPUs but only 32 CPUs; they were replaced
+    with homogeneous full-node H20/H200 requests.
+- active submitted generation jobs:
+  - before shard 001: job `101205`, `fiir-dpo64-b1-full`, pending at submission
+    snapshot, output root
+    `outputs/dpo_strict3mlip_1024_before_after/before_64x20_seed20260513_shard_001`
+  - before shard 002: job `101206`, `fiir-dpo64-b2-full`, pending at submission
+    snapshot, output root
+    `outputs/dpo_strict3mlip_1024_before_after/before_64x20_seed20260513_shard_002`
+  - after shard 001: job `101208`, `fiir-dpo64-a1-full`, pending at submission
+    snapshot, output root
+    `outputs/dpo_strict3mlip_1024_before_after/after_64x20_seed20260513_shard_001`
+  - after shard 002: job `101210`, `fiir-dpo64-a2-full`, pending at submission
+    snapshot, output root
+    `outputs/dpo_strict3mlip_1024_before_after/after_64x20_seed20260513_shard_002`
+- scheduling policy used: `FIIR_GPU_QUEUE_MODE=auto` with an explicit
+  homogeneous long-running CUDA allowlist `h200,h20,h20llm`.
+  Because no eligible long-running GPU node had free resources at submission
+  time, the effective mode was flexible queueing across those partitions.
+- resource request per active job: `gpu:8`, 192 CPUs, `02:00:00`, account
+  `hmt03`, conda environment `crystalformer`, JAX GPU preflight required. The
+  bulk runner will see `FIIR_TOTAL_GPUS=8` and can use eight concurrent GPU
+  workers with the full H20/H200 node CPU budget.
+- optional follow-up if clean: 64 formulas x 40 samples
+- execution policy: submit only through existing SLURM wrappers or project
+  submit wrappers; do not run CrystalFormer generation, MLIP validation, DFT,
+  or long evaluation on the login node.
+- scheduler caveat: use normal GPU resource ranking first, and use flexible
+  multi-partition queueing only when no eligible long-running GPU node has
+  enough free resources; `test` remains limited to explicitly bounded jobs of
+  30 minutes or less.
+- next step after completion: inspect all four `bulk_summary.json` files,
+  confirm matched before/after coverage, then prepare the matched
+  MACE+CHGNet+MatGL relaxation offline validation batches. Do not claim DPO
+  improvement from generation-only outputs.
+- evidence caveat: the completed 10x20 smoke and the deferred larger gate are
+  MLIP relaxation consensus proxy evidence, not DFT evidence and not
+  self-consistent hull-confirmed stability.
+
+### Previous Completed MACE-Only DPO Smoke Run
+
+The previous completed DPO smoke package is:
 
 ```text
 outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/dpo_smoke_manifest.json
@@ -297,8 +648,6 @@ Summary:
 - prepared pairs: 284
 - chosen/rejected raw-sequence JSONL rows: 284 / 284
 - before checkpoint: `external/checkpoints/crystalformer/alex20s_csp`
-- checkpoint start epoch: 46000
-- checkpoint target epoch: 46001
 - after checkpoint output root:
   `outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/after_checkpoint/`
 - produced after checkpoint:
@@ -306,10 +655,6 @@ Summary:
 - after checkpoint size: 159M
 - after checkpoint sha256:
   `42b11edfbf1586a1a8910e087616a5803486eba53b3901657c170c1b30c33fa6`
-- run script:
-  `outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/run_training.sh`
-- non-overwrite guard: the after output root is separate from the before
-  checkpoint directory.
 - SLURM job: `98336`, `fiir-cf-dpo-smoke`, `COMPLETED`, exit code `0:0`,
   elapsed `00:03:05`, node `gpu40902`.
 - SLURM logs:
@@ -386,42 +731,46 @@ Interpretation:
 
 ## Reproduction Commands
 
-Rebuild the current all-formula F3-aware DPO preference artifact:
-
-```bash
-python scripts/build_crystalformer_dpo_preferences.py \
-  --config configs/dpo_preference_builder.all_formula_mace_relax_20260512.json \
-  --fail-on-zero-pairs
-```
-
-Regenerate the training boundary artifact:
+Regenerate the current 1024 strict three-MLIP consensus training boundary:
 
 ```bash
 python scripts/prepare_crystalformer_dpo_training_boundary.py \
-  --preference-pairs-jsonl outputs/dpo_preferences/mace_relax_20260512_rebuild_current_filtered/dpo_preferences_all_formula/preference_pairs.jsonl \
-  --output-dir outputs/crystalformer_dpo_training_boundary/mace_relax_20260512_rebuild_current_filtered \
+  --preference-pairs-jsonl outputs/dpo_preferences/mace_chgnet_matgl_consensus_1024_20260513_import_rebuild/dpo_preferences/preference_pairs.jsonl \
+  --output-dir outputs/crystalformer_dpo_training_boundary/mace_chgnet_matgl_consensus_1024_20260513 \
   --crystalformer-work-dir external/CrystalFormer \
-  --checkpoint-dir external/checkpoints/crystalformer/alex20s_csp
+  --checkpoint-dir external/checkpoints/crystalformer/alex20s_csp \
+  --preference-artifact-label mace_chgnet_matgl_consensus_1024_20260513_import_rebuild \
+  --source-validation-jsonl outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_1024_20260513/normalized/validation_results.jsonl \
+  --input-candidate-count 1024 \
+  --f3-available-candidate-count 658 \
+  --disagreement-candidate-count 366 \
+  --evidence-caveat "1024 strict MACE+CHGNet+MatGL consensus labels are MLIP relaxation proxy evidence, not DFT evidence and not self-consistent hull-confirmed stability."
 ```
 
-Prepare the current non-overwriting DPO smoke run package:
+Prepare the current non-overwriting 1024 strict-consensus DPO smoke package:
 
 ```bash
 python scripts/prepare_crystalformer_dpo_smoke_run.py \
-  --preference-pairs-jsonl outputs/dpo_preferences/mace_relax_20260512_rebuild_current_filtered/dpo_preferences_all_formula/preference_pairs.jsonl \
-  --output-dir outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare \
+  --preference-pairs-jsonl outputs/dpo_preferences/mace_chgnet_matgl_consensus_1024_20260513_import_rebuild/dpo_preferences/preference_pairs.jsonl \
+  --output-dir outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare \
   --base-checkpoint-dir external/checkpoints/crystalformer/alex20s_csp \
   --crystalformer-work-dir external/CrystalFormer \
   --epochs 1 \
   --batchsize 32 \
-  --num-io-process 1
+  --num-io-process 1 \
+  --preference-artifact-label mace_chgnet_matgl_consensus_1024_20260513_import_rebuild \
+  --source-validation-jsonl outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_1024_20260513/normalized/validation_results.jsonl \
+  --input-candidate-count 1024 \
+  --f3-available-candidate-count 658 \
+  --disagreement-candidate-count 366 \
+  --evidence-caveat "1024 strict MACE+CHGNet+MatGL consensus labels are MLIP relaxation proxy evidence, not DFT evidence and not self-consistent hull-confirmed stability."
 ```
 
 Run the prepared smoke only on an allocated compute node with the CrystalFormer
 environment active. The reusable SLURM wrapper is:
 
 ```bash
-FIIR_DPO_RUN_SCRIPT=outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/run_training.sh \
+FIIR_DPO_RUN_SCRIPT=outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare/run_training.sh \
 sbatch scripts/slurm/run_crystalformer_dpo_smoke.slurm
 ```
 
@@ -429,7 +778,7 @@ The generated run script can also be run directly inside an interactive GPU
 allocation:
 
 ```bash
-outputs/crystalformer_dpo_runs/mace_relax_20260512_smoke_prepare/run_training.sh
+outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare/run_training.sh
 ```
 
 Verify code health:
@@ -443,15 +792,20 @@ pytest -q
 - Do not treat MACE single-point force/stress evidence as F3 stability. The
   3200-row single-point artifact is useful QA evidence but produces zero
   F3-available candidates.
-- Do not run full all-audit DPO rebuild directly over 102400 audit rows unless
-  the builder is optimized first; pair comparison is unnecessarily heavy for
-  this task. Use the 320-row F3-available filtered input for current DPO handoff.
+- Do not default to the old MACE-only 284-pair artifact for precision-first DPO
+  handoff. Use the 1024-candidate strict MACE+CHGNet+MatGL consensus preference
+  source unless a task explicitly requests the older artifact.
+- Do not describe the 1024 strict consensus labels as DFT or hull-confirmed
+  stability. They are MLIP relaxation proxy evidence.
 - Do not use the default BaTiO3 DPO config for all-formula pair building.
 - Do not commit large `outputs/` artifacts or checkpoints.
 
 ## Recommended Next Step
 
-Use the before/after generated candidates as a small sanity set for the same
-offline validation workflow, or expand the preference data before running any
-larger DPO. The current DPO smoke checkpoint should be treated as a pipeline
-artifact, not a performance-improved model.
+Wait for sufficient GPU compute resources, then run the larger matched
+before/after validation gate. Start with 64 formulas x 20 samples, then expand
+to 64 formulas x 40 only if the first scale-up is clean. Keep before/after
+checkpoints, formulas, seed, sampling parameters, and candidate count matched;
+report agreement, disagreement, diversity/collapse, coverage, preference-pair
+yield, and proxy-divergence checks. The deferred gate remains MLIP relaxation
+proxy evidence, not DFT or hull-confirmed stability.

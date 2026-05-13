@@ -29,6 +29,7 @@ from fiir_crystal.slurm_scheduling import (
     parse_scontrol_nodes,
     parse_sinfo_cpu_nodes,
     parse_sinfo_nodes,
+    parse_slurm_time_limit_minutes,
     plan_slurm_job,
     shell_assignments,
 )
@@ -71,6 +72,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="GPU ranking profile for the task precision.",
     )
     gpu.add_argument("--gpu-weight", action="append", default=[], help="Override a GPU weight as name=value.")
+    gpu.add_argument(
+        "--gpu-queue-mode",
+        choices=("auto", "pinned", "flexible"),
+        default="auto",
+        help=(
+            "GPU queue mode. auto pins the best currently free eligible node and "
+            "falls back to flexible multi-partition queueing only when no eligible node is free."
+        ),
+    )
 
     fixtures = parser.add_argument_group("fixtures")
     fixtures.add_argument("--scontrol-output")
@@ -156,6 +166,8 @@ def _build_plan(args: argparse.Namespace) -> dict[str, Any]:
         min_memory_mb=args.min_memory_mb,
         layout=args.layout,
         gpu_weights=parse_gpu_weights(args.gpu_weight, precision_profile=args.precision_profile),
+        time_limit_minutes=parse_slurm_time_limit_minutes(args.time),
+        queue_mode=args.gpu_queue_mode,
     )
     return plan_slurm_job(
         kind="gpu",
@@ -201,10 +213,17 @@ def _print_summary(plan: dict[str, Any], output_json: str | None) -> None:
         print(f"  selected_core_budget: {request['cpus'] if request['cpus'] is not None else 'auto'}")
     else:
         node = selection["selected_node"]
-        print(f"  selected_node: {node['name']}")
+        print(f"  selected_node: {node['name'] if node else 'slurm_assigned_at_runtime'}")
         print(f"  selected_partition: {selection['selected_partition']}")
-        print(f"  gpu_model: {node['gpu_model_key']}")
+        print(f"  gpu_model: {node['gpu_model_key'] if node else 'slurm_assigned_at_runtime'}")
         print(f"  precision_profile: {plan['config']['precision_profile']}")
+        print(f"  gpu_queue_mode: {plan['config']['effective_queue_mode']}")
+        if selection["selected_partition"] == plan["config"]["test_partition"]:
+            print(
+                "  test_partition_time_guard: "
+                f"eligible only up to {plan['config']['test_partition_max_minutes']} minutes; "
+                "selection still uses the normal GPU resource score"
+            )
         print(f"  requested_gpus: {request['gpus']}")
         print(f"  requested_cpus: {request['cpus']}")
         print(f"  requested_gres: {request['gres']}")

@@ -31,8 +31,12 @@ from fiir_crystal.slurm_gpu_policy import (
     parse_scontrol_nodes,
     parse_sinfo_cpu_counts,
     parse_sinfo_nodes,
+    parse_slurm_time_limit_minutes,
     parse_tres,
     plan_gpu_job,
+    effective_queue_mode,
+    flexible_queue_partitions,
+    queueable_gpu_nodes,
     select_best_gpu_node,
 )
 
@@ -579,6 +583,9 @@ __all__ = [
     "plan_cpu_job",
     "plan_gpu_job",
     "plan_slurm_job",
+    "effective_queue_mode",
+    "flexible_queue_partitions",
+    "queueable_gpu_nodes",
     "select_best_gpu_node",
     "select_cpu_partition",
     "shell_assignments",

@@ -46,6 +46,26 @@ Execution policy
   DFT, bulk generation, long evaluations, or other long-running workflows
   through SLURM (`sbatch` or the project submit wrappers) so work runs on
   allocated compute nodes.
+- When a submitted SLURM job needs to run for more than a brief startup window,
+  do not sit idle watching the queue. Monitor only the early startup window,
+  then work on safe, lightweight local tasks such as documentation, manifests,
+  schema checks, tests, or runbook preparation, and return later to inspect
+  `squeue`/`sacct` and produced artifacts.
+- For larger GPU jobs, first use the normal resource-aware GPU selection and
+  pin the best currently free eligible long-running GPU node. Queue flexibly
+  across eligible GPU partitions/nodes only when no long-running GPU node has
+  enough free resources, so SLURM can start the job on whichever eligible
+  resource becomes available first. Keep short bounded GPU sanity jobs eligible
+  for `test` only when the explicit time limit is 30 minutes or less.
+- GPU jobs must request actual GPUs, not merely land on a GPU node and use CPU
+  cores. For flexible larger jobs, set the requested GPU count explicitly
+  through the existing wrapper/planner knobs such as `FIIR_GPU_MIN_GPUS` or
+  `--min-gpus`.
+- For larger CrystalFormer generation, MLIP validation, DPO smoke/evaluation,
+  and similar GPU compute jobs, request the full GPU count of the target node
+  class whenever the candidate partitions are homogeneous enough to do so. On
+  the current long-running CUDA GPU partitions this usually means
+  `FIIR_GPU_MIN_GPUS=8`.
 - Local shell work is appropriate for lightweight inspection and development:
   `rg`, reading files, small stdlib scripts, formatting, dry-runs, schema
   checks, and focused unit tests that do not invoke external model
@@ -53,6 +73,14 @@ Execution policy
 - For SLURM work, prefer existing wrappers and planners under `scripts/slurm/`
   before inventing new submission commands. Use startup monitoring only for the
   early window, then leave long jobs to SLURM and inspect artifacts afterward.
+- Resource-use principle: every SLURM job must request and actually use the
+  full compute-resource shape of its target node or homogeneous partition set.
+  This applies to all submitted jobs, including smoke, debug, validation,
+  generation, training, and evaluation jobs. Configure both the SLURM request
+  and task-level concurrency so allocated CPUs, GPUs, and nodes are used rather
+  than left idle. If a workflow cannot use the full node shape, do not submit it
+  to SLURM in that form; reshape the task, choose a matching partition, or keep
+  it local only if it is lightweight and allowed by the login-node policy.
 
 External resources and dependencies
 -----------------------------------
@@ -96,3 +124,9 @@ Project memory discipline
   `outputs/`, but do not commit heavy generated artifacts.
 - If an experiment result changes the research direction or active next step,
   update the status documents in the same turn as the code or workflow change.
+- At the end of each task, inspect whether the completed work should be uploaded
+  to GitHub. If the change is a durable code, configuration, rule, or status
+  update and the worktree can be scoped cleanly without large ignored artifacts
+  or unrelated user changes, commit and push through the configured remote. If
+  upload is not safe, record why in the final response or status notes instead
+  of silently skipping it.

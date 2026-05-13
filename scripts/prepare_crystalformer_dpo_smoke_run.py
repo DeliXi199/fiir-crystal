@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from fiir_crystal.dpo.evidence import DpoEvidenceContext
 from fiir_crystal.dpo import (
     CrystalFormerDpoSmokeRunConfig,
     prepare_crystalformer_dpo_smoke_run,
@@ -36,6 +37,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--optimizer", default="adam", choices=["adam", "adamw"])
     parser.add_argument("--num-io-process", type=int, default=1)
     parser.add_argument("--max-pairs", type=int)
+    parser.add_argument("--preference-artifact-label")
+    parser.add_argument("--source-validation-jsonl")
+    parser.add_argument("--input-candidate-count", type=int)
+    parser.add_argument("--f3-available-candidate-count", type=int)
+    parser.add_argument("--disagreement-candidate-count", type=int)
+    parser.add_argument("--evidence-caveat")
     return parser.parse_args(argv)
 
 
@@ -57,6 +64,14 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         optimizer=args.optimizer,
         num_io_process=args.num_io_process,
         max_pairs=args.max_pairs,
+        evidence_context=DpoEvidenceContext(
+            preference_artifact_label=args.preference_artifact_label,
+            source_validation_jsonl=Path(args.source_validation_jsonl) if args.source_validation_jsonl else None,
+            input_candidate_count=args.input_candidate_count,
+            f3_available_candidate_count=args.f3_available_candidate_count,
+            disagreement_candidate_count=args.disagreement_candidate_count,
+            caveat=args.evidence_caveat or DpoEvidenceContext().caveat,
+        ),
     )
     try:
         result = prepare_crystalformer_dpo_smoke_run(config)

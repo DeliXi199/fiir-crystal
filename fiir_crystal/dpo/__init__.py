@@ -1,5 +1,6 @@
 """DPO data preparation helpers for CrystalFormer outputs."""
 
+from fiir_crystal.dpo.evidence import DpoEvidenceContext
 from fiir_crystal.dpo.preference_builder import (
     DPOPreferencePair,
     GEOMETRY_CHEMISTRY_ONLY,
@@ -27,6 +28,7 @@ from fiir_crystal.dpo.training_boundary import (
 
 __all__ = [
     "DPOPreferencePair",
+    "DpoEvidenceContext",
     "GEOMETRY_CHEMISTRY_ONLY",
     "PreferenceBuildConfig",
     "PreferenceBuildSummary",

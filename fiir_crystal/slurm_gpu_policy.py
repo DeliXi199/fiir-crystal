@@ -57,6 +57,8 @@ DEFAULT_GPU_WEIGHTS: dict[str, int] = dict(TF32_GPU_WEIGHTS)
 CUDA_PARTITION_HINTS = ("h200", "h20", "h800", "gpu4090", "test")
 NON_CUDA_PARTITION_HINTS = ("amd", "intel")
 BLOCKED_STATE_MARKERS = ("DOWN", "DRAIN", "FAIL", "MAINT", "NO_RESP", "POWER", "RESV")
+DEFAULT_TEST_PARTITION = "test"
+DEFAULT_TEST_PARTITION_MAX_MINUTES = 30
 
 
 @dataclass(frozen=True)
@@ -137,10 +139,18 @@ class GpuSchedulingConfig:
     layout: str = "single-task"
     exclusive_when_full_node: bool = True
     gpu_weights: Mapping[str, int] | None = None
+    time_limit_minutes: int | None = None
+    test_partition: str = DEFAULT_TEST_PARTITION
+    test_partition_max_minutes: int = DEFAULT_TEST_PARTITION_MAX_MINUTES
+    queue_mode: str = "auto"
 
     def __post_init__(self) -> None:
         profile = normalize_precision_profile(self.precision_profile)
         object.__setattr__(self, "precision_profile", profile)
+        queue_mode = self.queue_mode.strip().lower()
+        if queue_mode not in {"auto", "pinned", "flexible"}:
+            raise ValueError("GPU queue_mode must be one of: auto, pinned, flexible")
+        object.__setattr__(self, "queue_mode", queue_mode)
         if self.gpu_weights is None:
             object.__setattr__(self, "gpu_weights", gpu_weights_for_profile(profile))
         else:
@@ -271,8 +281,9 @@ def parse_sinfo_nodes(text: str) -> list[GpuNode]:
                 "features": [],
             },
         )
-        if partition not in existing["partitions"]:
-            existing["partitions"].append(partition)
+        normalized_partition = partition.strip().rstrip("*")
+        if normalized_partition and normalized_partition not in existing["partitions"]:
+            existing["partitions"].append(normalized_partition)
         for feature in _split_csv(features):
             if feature not in existing["features"]:
                 existing["features"].append(feature)
@@ -313,6 +324,8 @@ def select_best_gpu_node(
             continue
         partition = select_partition(node, config.allowed_partitions)
         if not partition:
+            continue
+        if not partition_allows_time_limit(partition, config):
             continue
         scored.append((score_node(node, config), node, partition))
     if not scored:
@@ -370,6 +383,15 @@ def node_is_cuda_compatible(node: GpuNode) -> bool:
     if model in {"h200", "h800", "h20", "rtx4090"}:
         return True
     return any(any(hint in partition for hint in CUDA_PARTITION_HINTS) for partition in partitions)
+
+
+def partition_allows_time_limit(partition: str, config: GpuSchedulingConfig) -> bool:
+    normalized = partition.strip().rstrip("*")
+    if normalized != config.test_partition:
+        return True
+    if config.time_limit_minutes is None:
+        return False
+    return config.time_limit_minutes <= config.test_partition_max_minutes
 
 
 def score_node(node: GpuNode, config: GpuSchedulingConfig) -> float:
@@ -459,6 +481,88 @@ def build_sbatch_plan(
     }
 
 
+def build_flexible_queue_sbatch_plan(
+    partitions: Sequence[str],
+    config: GpuSchedulingConfig,
+    *,
+    job_name: str = "fiir-gpu-job",
+    account: str | None = None,
+    time_limit: str | None = None,
+    log_dir: str = "logs/slurm",
+    layout: str = "single-task",
+    submit_script: str | None = None,
+) -> dict[str, Any]:
+    """Build sbatch args that queue one job across multiple GPU partitions.
+
+    This mode intentionally does not pin `--nodelist`; SLURM can place the job
+    on whichever eligible node in the partition set becomes available first.
+    """
+
+    if not partitions:
+        raise ValueError("flexible GPU queue plan requires at least one partition")
+    gpu_count = max(1, int(config.min_gpus))
+    cpu_count = max(1, int(config.min_cpus))
+    args = [
+        "--nodes",
+        "1",
+        "--partition",
+        ",".join(partitions),
+        "--job-name",
+        job_name,
+        "--gres",
+        f"gpu:{gpu_count}",
+    ]
+    if account:
+        args.extend(["--account", account])
+    if time_limit:
+        args.extend(["--time", time_limit])
+    if layout == "one-task-per-gpu":
+        cpus_per_task = max(1, cpu_count // gpu_count)
+        args.extend(["--ntasks-per-node", str(gpu_count), "--cpus-per-task", str(cpus_per_task)])
+        unassigned_cpus = cpu_count - (cpus_per_task * gpu_count)
+    elif layout == "single-task":
+        cpus_per_task = cpu_count
+        unassigned_cpus = 0
+        args.extend(["--ntasks", "1", "--cpus-per-task", str(cpu_count)])
+    else:
+        raise ValueError(f"unknown GPU task layout: {layout}")
+
+    env_items = {
+        "FIIR_GPU_NODE": "slurm_assigned_at_runtime",
+        "FIIR_GPU_PARTITION": "+".join(partitions),
+        "FIIR_TOTAL_GPUS": str(gpu_count),
+        "FIIR_TOTAL_CPU_CORES": str(cpu_count),
+        "FIIR_GPU_MODEL": "slurm_assigned_at_runtime",
+        "FIIR_GPU_GRES": f"gpu:{gpu_count}",
+        "FIIR_GPU_QUEUE_MODE": "flexible",
+    }
+    args.extend(["--export", "ALL," + ",".join(f"{key}={value}" for key, value in env_items.items())])
+    args.extend(["--output", f"{log_dir}/%x_%j.log", "--error", f"{log_dir}/%x_%j.err"])
+    command = ["sbatch", *args]
+    if submit_script:
+        command.append(submit_script)
+    return {
+        "sbatch_args": args,
+        "sbatch_command": command,
+        "sbatch_command_quoted": " ".join(shlex.quote(part) for part in command),
+        "request": {
+            "node": None,
+            "partition": ",".join(partitions),
+            "candidate_partitions": list(partitions),
+            "gpus": gpu_count,
+            "cpus": cpu_count,
+            "gres": f"gpu:{gpu_count}",
+            "layout": layout,
+            "cpus_per_task": cpus_per_task,
+            "unassigned_cpu_cores": unassigned_cpus,
+            "exclusive": False,
+            "uses_all_currently_free_gpus": False,
+            "uses_all_currently_free_cpus": False,
+            "queue_mode": "flexible",
+        },
+    }
+
+
 def plan_gpu_job(
     nodes: Sequence[GpuNode],
     config: GpuSchedulingConfig | None = None,
@@ -467,8 +571,78 @@ def plan_gpu_job(
     """Return a complete scheduler plan from pre-parsed nodes."""
 
     config = config or GpuSchedulingConfig()
+    if config.queue_mode == "flexible":
+        partitions = flexible_queue_partitions(nodes, config)
+        if not partitions:
+            return {
+                "ready": False,
+                "reason": "no_queueable_gpu_partition_for_flexible_mode",
+                "config": config_to_dict(config, effective_queue_mode_override="flexible"),
+                "selection": None,
+                "sbatch": None,
+            }
+        sbatch = build_flexible_queue_sbatch_plan(
+            partitions,
+            config,
+            layout=config.layout,
+            **sbatch_kwargs,
+        )
+        return {
+            "ready": True,
+            "reason": "flexible_gpu_queue_across_candidate_partitions",
+            "config": config_to_dict(config, effective_queue_mode_override="flexible"),
+            "selection": {
+                "selected_node": None,
+                "selected_partition": ",".join(partitions),
+                "candidate_partitions": list(partitions),
+                "candidate_nodes": [
+                    node.to_dict()
+                    for node in queueable_gpu_nodes(nodes, config)
+                ],
+                "reason": "large_gpu_job_queue_without_nodelist",
+            },
+            "sbatch": sbatch,
+        }
     selection = select_best_gpu_node(nodes, config)
-    if selection is None:
+    if selection is not None:
+        sbatch = build_sbatch_plan(
+            selection,
+            layout=config.layout,
+            exclusive_when_full_node=config.exclusive_when_full_node,
+            **sbatch_kwargs,
+        )
+        return {
+            "ready": True,
+            "reason": selection.reason,
+            "config": config_to_dict(config, effective_queue_mode_override="pinned"),
+            "selection": selection.to_dict(),
+            "sbatch": sbatch,
+        }
+    if config.queue_mode == "auto":
+        partitions = flexible_queue_partitions(nodes, config)
+        if partitions:
+            sbatch = build_flexible_queue_sbatch_plan(
+                partitions,
+                config,
+                layout=config.layout,
+                **sbatch_kwargs,
+            )
+            return {
+                "ready": True,
+                "reason": "no_free_gpu_resources_flexible_queue_across_candidate_partitions",
+                "config": config_to_dict(config, effective_queue_mode_override="flexible"),
+                "selection": {
+                    "selected_node": None,
+                    "selected_partition": ",".join(partitions),
+                    "candidate_partitions": list(partitions),
+                    "candidate_nodes": [
+                        node.to_dict()
+                        for node in queueable_gpu_nodes(nodes, config)
+                    ],
+                    "reason": "auto_fallback_to_queue_without_nodelist_after_no_free_gpu",
+                },
+                "sbatch": sbatch,
+            }
         return {
             "ready": False,
             "reason": "no_eligible_gpu_node_with_free_resources",
@@ -476,22 +650,21 @@ def plan_gpu_job(
             "selection": None,
             "sbatch": None,
         }
-    sbatch = build_sbatch_plan(
-        selection,
-        layout=config.layout,
-        exclusive_when_full_node=config.exclusive_when_full_node,
-        **sbatch_kwargs,
-    )
+
     return {
-        "ready": True,
-        "reason": selection.reason,
+        "ready": False,
+        "reason": "no_eligible_gpu_node_with_free_resources",
         "config": config_to_dict(config),
-        "selection": selection.to_dict(),
-        "sbatch": sbatch,
+        "selection": None,
+        "sbatch": None,
     }
 
 
-def config_to_dict(config: GpuSchedulingConfig) -> dict[str, Any]:
+def config_to_dict(
+    config: GpuSchedulingConfig,
+    *,
+    effective_queue_mode_override: str | None = None,
+) -> dict[str, Any]:
     return {
         "accelerator": config.accelerator,
         "precision_profile": config.precision_profile,
@@ -502,7 +675,83 @@ def config_to_dict(config: GpuSchedulingConfig) -> dict[str, Any]:
         "layout": config.layout,
         "exclusive_when_full_node": config.exclusive_when_full_node,
         "gpu_weights": effective_gpu_weights(config),
+        "time_limit_minutes": config.time_limit_minutes,
+        "test_partition": config.test_partition,
+        "test_partition_max_minutes": config.test_partition_max_minutes,
+        "queue_mode": config.queue_mode,
+        "effective_queue_mode": effective_queue_mode_override or effective_queue_mode(config),
     }
+
+
+def effective_queue_mode(config: GpuSchedulingConfig) -> str:
+    if config.queue_mode != "auto":
+        return config.queue_mode
+    return "pinned_then_flexible_on_no_free_gpu"
+
+
+def flexible_queue_partitions(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -> tuple[str, ...]:
+    allowed = tuple(config.allowed_partitions)
+    if allowed:
+        matching_from_nodes: list[str] = []
+        for node in queueable_gpu_nodes(nodes, config):
+            for partition in node.partitions:
+                if partition in allowed and partition_allows_time_limit(partition, config):
+                    matching_from_nodes.append(partition)
+        if matching_from_nodes:
+            return tuple(
+                sorted(dict.fromkeys(matching_from_nodes), key=lambda item: (_partition_rank(item), item))
+            )
+        if nodes:
+            return ()
+        candidates = [
+            partition
+            for partition in allowed
+            if partition_allows_time_limit(partition, config)
+        ]
+        return tuple(sorted(dict.fromkeys(candidates), key=lambda item: (_partition_rank(item), item)))
+    partitions: list[str] = []
+    for node in queueable_gpu_nodes(nodes, config):
+        for partition in node.partitions:
+            if not partition_allows_time_limit(partition, config):
+                continue
+            if partition not in partitions:
+                partitions.append(partition)
+    return tuple(sorted(partitions, key=lambda item: (_partition_rank(item), item)))
+
+
+def queueable_gpu_nodes(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -> tuple[GpuNode, ...]:
+    candidates: list[GpuNode] = []
+    for node in nodes:
+        if not node_is_queueable(node, config):
+            continue
+        candidates.append(node)
+    return tuple(
+        sorted(
+            candidates,
+            key=lambda node: (
+                -node.total_gpus,
+                -node.total_cpus,
+                select_partition(node, config.allowed_partitions),
+                node.name,
+            ),
+        )
+    )
+
+
+def node_is_queueable(node: GpuNode, config: GpuSchedulingConfig) -> bool:
+    if not _state_allows_queueing(node.state):
+        return False
+    if node.total_gpus < config.min_gpus:
+        return False
+    if node.total_cpus < config.min_cpus:
+        return False
+    if node.total_memory_mb < config.min_memory_mb:
+        return False
+    if config.allowed_partitions and not set(node.partitions).intersection(config.allowed_partitions):
+        return False
+    if config.accelerator == "cuda" and not node_is_cuda_compatible(node):
+        return False
+    return True
 
 
 def select_partition(node: GpuNode, allowed_partitions: Sequence[str] = ()) -> str:
@@ -608,6 +857,43 @@ def parse_gpu_weights(
     return weights
 
 
+def parse_slurm_time_limit_minutes(value: str | None) -> int | None:
+    """Parse common SLURM time limit formats into ceiling minutes."""
+
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+
+    days = 0
+    clock = text
+    if "-" in text:
+        raw_days, clock = text.split("-", 1)
+        days = _positive_int(raw_days)
+
+    pieces = clock.split(":")
+    if len(pieces) == 1:
+        hours = 0
+        minutes = _positive_int(pieces[0])
+        seconds = 0
+    elif len(pieces) == 2:
+        hours = 0
+        minutes = _positive_int(pieces[0])
+        seconds = _positive_int(pieces[1])
+    elif len(pieces) == 3:
+        hours = _positive_int(pieces[0])
+        minutes = _positive_int(pieces[1])
+        seconds = _positive_int(pieces[2])
+    else:
+        raise ValueError(f"unsupported SLURM time limit format: {value}")
+
+    total_seconds = ((days * 24 + hours) * 60 + minutes) * 60 + seconds
+    if total_seconds <= 0:
+        return 0
+    return (total_seconds + 59) // 60
+
+
 def _split_scontrol_blocks(text: str) -> list[str]:
     blocks: list[str] = []
     current: list[str] = []
@@ -668,6 +954,11 @@ def _state_allows_new_work(state: str) -> bool:
     if any(marker in upper for marker in BLOCKED_STATE_MARKERS):
         return False
     return "IDLE" in upper or "MIX" in upper
+
+
+def _state_allows_queueing(state: str) -> bool:
+    upper = state.upper()
+    return not any(marker in upper for marker in BLOCKED_STATE_MARKERS)
 
 
 def _partition_rank(partition: str) -> int:

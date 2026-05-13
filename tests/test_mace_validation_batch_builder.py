@@ -127,6 +127,50 @@ def test_build_mace_batch_excludes_already_validated_ids(tmp_path: Path) -> None
     assert result["summary"]["skipped_reason_counts"] == {"already_validated": 1}
 
 
+def test_build_mace_batch_can_prefix_output_candidate_ids(tmp_path: Path) -> None:
+    root = tmp_path / "run" / "smoke" / "crystalformer_audit" / "CaTiO3"
+    _write_jsonl(
+        root / "candidates.jsonl",
+        [{"candidate_id": "cf_0", "composition": "CaTiO3", "metadata": {}, "condition": {"formula": "CaTiO3"}}],
+    )
+    _write_jsonl(
+        root / "audit_candidates.jsonl",
+        [{"candidate_id": "cf_0", "composition": "CaTiO3", "condition": {"formula": "CaTiO3"}}],
+    )
+    output_dir = tmp_path / "batch"
+
+    result = main(
+        [
+            "--candidate-jsonl",
+            str(root / "candidates.jsonl"),
+            "--output-dir",
+            str(output_dir),
+            "--candidate-id-prefix",
+            "before__",
+        ]
+    )
+
+    selected = [
+        json.loads(line)
+        for line in (output_dir / "selected_candidates.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    index_rows = [
+        json.loads(line)
+        for line in (output_dir / "candidate_index.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    selection_rows = [
+        json.loads(line)
+        for line in (output_dir / "selection_table.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert result["summary"]["candidate_id_prefix"] == "before__"
+    assert selected[0]["candidate_id"] == "before__cf_0"
+    assert selected[0]["metadata"]["mace_batch_original_candidate_id"] == "cf_0"
+    assert index_rows[0]["candidate_id"] == "before__cf_0"
+    assert index_rows[0]["mace_batch_original_candidate_id"] == "cf_0"
+    assert selection_rows[0]["candidate_id"] == "before__cf_0"
+    assert selection_rows[0]["original_candidate_id"] == "cf_0"
+
+
 def test_build_mace_batch_records_per_formula_overflow(tmp_path: Path) -> None:
     root = tmp_path / "run" / "smoke" / "crystalformer_audit" / "BaZrO3"
     candidates = [

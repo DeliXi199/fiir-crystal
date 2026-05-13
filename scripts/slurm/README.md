@@ -90,6 +90,19 @@ Useful GPU submitter overrides:
   `gpu4090_8` only when you intentionally want to restrict placement.
 - `FIIR_GPU_ACCELERATOR`: `cuda` or `any`, default `cuda`.
 - `FIIR_GPU_MIN_GPUS`, `FIIR_GPU_MIN_CPUS`, `FIIR_GPU_MIN_MEMORY_MB`: minimum remaining resources.
+  For larger CrystalFormer generation, MLIP validation, DPO smoke/evaluation,
+  and similar GPU compute jobs on the current long-running CUDA partitions, use
+  `FIIR_GPU_MIN_GPUS=8` so the job requests the full node GPU set. Also set
+  `FIIR_GPU_MIN_CPUS` to the full CPU count of the target homogeneous partition
+  set, for example `192` on current H20/H200 nodes. Do not submit SLURM jobs
+  with partial-node GPU/CPU requests; reshape the task or choose a matching
+  partition so the allocation is actually used.
+- `FIIR_GPU_QUEUE_MODE`: `auto`, `pinned`, or `flexible`. Default `auto`
+  first uses pinned placement on the best currently free eligible GPU node,
+  then falls back to flexible multi-partition queueing only when no eligible
+  node has enough free resources. Use `flexible` explicitly only when the job
+  should wait on several eligible GPU partitions at once even if a node is
+  currently free.
 - `FIIR_SLURM_ACCOUNT`: account passed to `sbatch`, default `hmt03`.
 - `FIIR_REQUIRE_JAX_GPU`: set to `0` only for dry debugging without a GPU backend.
 - `FIIR_GPU_PLAN_JSON`: path for the deterministic GPU scheduling plan.
@@ -162,6 +175,12 @@ is still listed by `squeue` and stderr is empty after the startup window, stop
 watching it interactively and inspect the expected summary artifact after the
 job finishes.
 
+After a long SLURM job is submitted and the startup window is clean, use the
+waiting time for safe local work that does not consume compute resources:
+documentation, manifest/runbook updates, schema checks, dry-runs, focused
+unit tests, and post-run analysis preparation. Then return later to inspect
+`squeue`, `sacct`, SLURM logs, and the expected artifacts.
+
 For CrystalFormer bulk runs, the expected final summary is usually:
 
 ```text
@@ -215,6 +234,25 @@ does not restrict the planner to a fixed partition like `gpu4090_8`. Every GPU
 submission should therefore be selected from the current cluster state unless a
 caller deliberately provides a partition allowlist.
 
+The GPU submit wrapper also defaults to `FIIR_GPU_QUEUE_MODE=auto`. In auto
+mode, the planner first uses the original resource-aware pinned strategy: pick
+the best currently free eligible GPU node and submit with `--nodelist`. Only
+when no eligible long-running GPU node has enough free GPUs/CPUs does auto
+fall back to flexible multi-partition queueing. Flexible mode does not use `--nodelist`. It requests the minimum required GPUs/CPUs and lets SLURM start
+the job on whichever eligible partition/node becomes available first. Set
+`FIIR_GPU_MIN_GPUS` to the GPU count the job should actually consume; flexible
+mode still requests GPUs with `--gres` and must not be used as a CPU-only
+placement shortcut.
+
+The `test` partition is part of the CUDA-compatible GPU policy and uses the
+same resource-aware ranking as every other GPU partition. It is not preferred
+just because a job is small: larger available GPU resources still win by the
+normal score. The extra rule is a time guard: `test` is eligible only when the
+requested time limit is explicitly 30 minutes or less, for example
+`--time 00:30:00` or `FIIR_TIME_LIMIT=00:30:00`. If no time limit is provided,
+or if the requested time exceeds 30 minutes, `test` is skipped even if it has
+idle GPUs.
+
 Use `--precision-profile tf32` for CrystalFormer/JAX generation and fast MACE
 single-point screening. Use `--precision-profile fp64` for MACE geometry
 relaxation or other double-precision GPU work. The MACE submit path sets
@@ -235,11 +273,14 @@ python scripts/slurm/plan_slurm_job.py \
   --output-json outputs/slurm_gpu_plans/mlip_gpu_smoke_plan.json
 ```
 
-The generated plan requests one node, pins the selected node with `--nodelist`,
-requests all currently free GPUs with `--gres`, and requests all currently free
-CPU cores. For a fully idle node it also adds `--exclusive`; for a partially
-used `MIXED` node it requests only the remaining free resources and does not
-try to take resources already allocated to other jobs.
+In pinned mode, the generated plan requests one node, pins the selected node
+with `--nodelist`, requests all currently free GPUs with `--gres`, and requests
+all currently free CPU cores. For a fully idle node it also adds `--exclusive`;
+for a partially used `MIXED` node it requests only the remaining free resources
+and does not try to take resources already allocated to other jobs. In flexible
+mode, the generated plan queues on the candidate partition set, does not use
+`--nodelist`, and records that the final node will be assigned by SLURM at
+runtime.
 
 Useful options:
 

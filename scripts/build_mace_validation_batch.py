@@ -60,6 +60,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--require-f1-pass", action="store_true")
     parser.add_argument("--require-f2-pass", action="store_true")
     parser.add_argument("--exclude-validation-jsonl", action="append", default=[])
+    parser.add_argument(
+        "--candidate-id-prefix",
+        default="",
+        help="Optional prefix applied to selected output candidate_id values; original ids are preserved in metadata.",
+    )
     parser.add_argument("--strict", action="store_true")
     return parser.parse_args(argv)
 
@@ -284,9 +289,11 @@ def _write_outputs(
     summary_path = output_dir / "batch_summary.json"
     report_path = output_dir / "report.md"
 
-    selected_candidates = [_candidate_with_batch_metadata(bundle, output_dir) for bundle in selected]
-    candidate_index = [_candidate_index_row(bundle) for bundle in selected]
-    selection_table = [_selection_row(bundle) for bundle in selected]
+    selected_candidates = [
+        _candidate_with_batch_metadata(bundle, output_dir, args.candidate_id_prefix) for bundle in selected
+    ]
+    candidate_index = [_candidate_index_row(bundle, args.candidate_id_prefix) for bundle in selected]
+    selection_table = [_selection_row(bundle, args.candidate_id_prefix) for bundle in selected]
     formula_counts = Counter(bundle.formula for bundle in selected)
     skipped_counts = Counter(str(row["reason"]) for row in skipped)
     summary = {
@@ -305,6 +312,7 @@ def _write_outputs(
         "per_formula_limit": args.per_formula_limit,
         "max_total": args.max_total,
         "sort": args.sort,
+        "candidate_id_prefix": args.candidate_id_prefix,
         "filters": {
             "require_audit": bool(args.require_audit),
             "require_dpo_eligible": bool(args.require_dpo_eligible),
@@ -347,11 +355,22 @@ def _write_outputs(
     }
 
 
-def _candidate_with_batch_metadata(bundle: CandidateBundle, output_dir: Path) -> dict[str, Any]:
+def _batch_candidate_id(bundle: CandidateBundle, candidate_id_prefix: str) -> str:
+    return f"{candidate_id_prefix}{bundle.candidate_id}" if candidate_id_prefix else bundle.candidate_id
+
+
+def _candidate_with_batch_metadata(
+    bundle: CandidateBundle,
+    output_dir: Path,
+    candidate_id_prefix: str,
+) -> dict[str, Any]:
     row = dict(bundle.candidate)
+    row["candidate_id"] = _batch_candidate_id(bundle, candidate_id_prefix)
     metadata = dict(row.get("metadata", {})) if isinstance(row.get("metadata"), dict) else {}
     metadata["mace_batch_output_dir"] = str(output_dir)
     metadata["mace_batch_source_candidates_jsonl"] = str(bundle.source_candidates_jsonl)
+    metadata["mace_batch_original_candidate_id"] = bundle.candidate_id
+    metadata["mace_batch_candidate_id_prefix"] = candidate_id_prefix
     if bundle.source_audit_jsonl is not None:
         metadata["mace_batch_source_audit_jsonl"] = str(bundle.source_audit_jsonl)
     metadata["mace_batch_ranking_score"] = bundle.ranking_score
@@ -360,7 +379,7 @@ def _candidate_with_batch_metadata(bundle: CandidateBundle, output_dir: Path) ->
     return row
 
 
-def _candidate_index_row(bundle: CandidateBundle) -> dict[str, Any]:
+def _candidate_index_row(bundle: CandidateBundle, candidate_id_prefix: str) -> dict[str, Any]:
     if bundle.audit is not None:
         row = dict(bundle.audit)
     else:
@@ -369,7 +388,9 @@ def _candidate_index_row(bundle: CandidateBundle) -> dict[str, Any]:
             "composition": bundle.formula,
             "condition": bundle.candidate.get("condition", {"formula": bundle.formula}),
         }
-    row.setdefault("candidate_id", bundle.candidate_id)
+    row["candidate_id"] = _batch_candidate_id(bundle, candidate_id_prefix)
+    row["mace_batch_original_candidate_id"] = bundle.candidate_id
+    row["mace_batch_candidate_id_prefix"] = candidate_id_prefix
     row.setdefault("composition", bundle.formula)
     row.setdefault("condition", bundle.candidate.get("condition", {"formula": bundle.formula}))
     row["mace_batch_source_candidates_jsonl"] = str(bundle.source_candidates_jsonl)
@@ -378,9 +399,10 @@ def _candidate_index_row(bundle: CandidateBundle) -> dict[str, Any]:
     return row
 
 
-def _selection_row(bundle: CandidateBundle) -> dict[str, Any]:
+def _selection_row(bundle: CandidateBundle, candidate_id_prefix: str) -> dict[str, Any]:
     return {
-        "candidate_id": bundle.candidate_id,
+        "candidate_id": _batch_candidate_id(bundle, candidate_id_prefix),
+        "original_candidate_id": bundle.candidate_id,
         "formula": bundle.formula,
         "ranking_score": bundle.ranking_score,
         "fiir_score": bundle.fiir_score,

@@ -57,6 +57,16 @@ def test_training_boundary_writes_manifest_and_report(tmp_path) -> None:
             str(output_dir),
             "--crystalformer-work-dir",
             str(work_dir),
+            "--preference-artifact-label",
+            "strict_three_mlip_fixture",
+            "--input-candidate-count",
+            "2",
+            "--f3-available-candidate-count",
+            "1",
+            "--disagreement-candidate-count",
+            "1",
+            "--evidence-caveat",
+            "fixture labels are proxy evidence",
         ]
     )
 
@@ -70,6 +80,12 @@ def test_training_boundary_writes_manifest_and_report(tmp_path) -> None:
     manifest = json.loads((output_dir / "trainer_manifest.json").read_text(encoding="utf-8"))
     assert manifest["external_training_only"] is True
     assert "torch" in manifest["not_core_dependencies"]
+    assert "MatGL" in manifest["not_core_dependencies"]
+    assert manifest["evidence_context"]["preference_artifact_label"] == "strict_three_mlip_fixture"
+    assert manifest["evidence_context"]["input_candidate_count"] == 2
+    assert manifest["evidence_context"]["f3_available_candidate_count"] == 1
+    assert manifest["evidence_context"]["disagreement_candidate_count"] == 1
+    assert manifest["evidence_context"]["caveat"] == "fixture labels are proxy evidence"
 
 
 def test_training_boundary_does_not_execute_command_without_run_training(tmp_path) -> None:

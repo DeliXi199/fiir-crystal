@@ -15,6 +15,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Sequence
 
+from fiir_crystal.dpo.evidence import DpoEvidenceContext
 from fiir_crystal.dpo.preference_builder import (
     GEOMETRY_CHEMISTRY_ONLY,
     SEQUENCE_FIELDS,
@@ -42,6 +43,7 @@ class TrainingBoundaryConfig:
     require_submodule_for_training: bool = False
     training_command: str | None = None
     run_training: bool = False
+    evidence_context: DpoEvidenceContext = field(default_factory=DpoEvidenceContext)
 
 
 @dataclass(slots=True)
@@ -81,6 +83,7 @@ class TrainingBoundarySummary:
     preference_pairs_jsonl: str
     output_dir: str
     pair_validation: dict[str, Any]
+    evidence_context: dict[str, Any]
     workspace: dict[str, Any]
     ready_for_external_training: bool
     blocking_reasons: list[str] = field(default_factory=list)
@@ -95,6 +98,7 @@ class TrainingBoundarySummary:
             "preference_pairs_jsonl": self.preference_pairs_jsonl,
             "output_dir": self.output_dir,
             "pair_validation": dict(self.pair_validation),
+            "evidence_context": dict(self.evidence_context),
             "workspace": dict(self.workspace),
             "ready_for_external_training": self.ready_for_external_training,
             "blocking_reasons": list(self.blocking_reasons),
@@ -189,13 +193,14 @@ def render_training_boundary_report(summary: TrainingBoundarySummary) -> str:
 
     data = summary.to_dict()
     pair = data["pair_validation"]
+    evidence = data["evidence_context"]
     workspace = data["workspace"].get("crystalformer", {})
     lines = [
         "# CrystalFormer DPO Training Boundary Report",
         "",
         "## Boundary",
         "- FIIR Crystal does not implement DPO training.",
-        "- CrystalFormer, JAX, torch, pymatgen, and ASE remain outside core dependencies.",
+        "- CrystalFormer, JAX, torch, pymatgen, ASE, MACE, CHGNet, and MatGL remain outside core dependencies.",
         "- Any real training must happen through an explicit external command in the CrystalFormer workspace.",
         "",
         "## Readiness",
@@ -210,6 +215,14 @@ def render_training_boundary_report(summary: TrainingBoundarySummary) -> str:
         f"- invalid_pair_count: {pair['invalid_pair_count']}",
         f"- invalid_reasons: {pair['invalid_reasons']}",
         f"- preference_type_breakdown: {pair['preference_type_breakdown']}",
+        "",
+        "## Evidence Context",
+        f"- preference_artifact_label: {evidence.get('preference_artifact_label')}",
+        f"- source_validation_jsonl: `{evidence.get('source_validation_jsonl')}`",
+        f"- input_candidate_count: {evidence.get('input_candidate_count')}",
+        f"- f3_available_candidate_count: {evidence.get('f3_available_candidate_count')}",
+        f"- disagreement_candidate_count: {evidence.get('disagreement_candidate_count')}",
+        f"- caveat: {evidence.get('caveat')}",
         "",
         "## Workspace",
         f"- crystalformer_dir: `{workspace.get('relative_path', 'unknown')}`",
@@ -256,6 +269,7 @@ def _build_summary(
         preference_pairs_jsonl=str(config.preference_pairs_jsonl),
         output_dir=str(config.output_dir),
         pair_validation=pair_summary.to_dict(),
+        evidence_context=config.evidence_context.to_dict(),
         workspace=workspace_summary,
         ready_for_external_training=not blocking,
         blocking_reasons=blocking,
@@ -277,12 +291,13 @@ def _build_manifest(
         "preference_pairs_sha256": sha256(data).hexdigest(),
         "preference_pair_count": len(pairs),
         "pair_validation": summary.pair_validation,
+        "evidence_context": summary.evidence_context,
         "workspace": summary.workspace.get("crystalformer", {}),
         "checkpoint_dir": str(config.checkpoint_dir),
         "training_command": config.training_command,
         "run_training_requested": config.run_training,
         "required_external_dependencies": ["CrystalFormer", "JAX", "torch"],
-        "not_core_dependencies": ["CrystalFormer", "JAX", "torch", "pymatgen", "ASE"],
+        "not_core_dependencies": ["CrystalFormer", "JAX", "torch", "pymatgen", "ASE", "MACE", "CHGNet", "MatGL"],
         "next_manual_steps": [
             "Review trainer_manifest.json and report.md.",
             "Use a recorded CrystalFormer fork or submodule for code changes.",
