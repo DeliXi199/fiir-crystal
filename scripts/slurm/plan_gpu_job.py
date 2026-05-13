@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Plan a whole-resource SLURM GPU job before submission.
+"""Plan a resource-aware SLURM GPU job before submission.
 
 By default this script only inspects SLURM and prints a deterministic sbatch
 plan. It submits only when --run-sbatch is explicitly provided.
@@ -20,6 +20,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from fiir_crystal.io import write_json
 from fiir_crystal.slurm_scheduling import (
+    DEFAULT_FLEXIBLE_QUEUE_CPUS,
+    DEFAULT_FLEXIBLE_QUEUE_GPUS,
     GPU_WEIGHT_PROFILES,
     GpuSchedulingConfig,
     discover_gpu_nodes,
@@ -36,7 +38,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Select the strongest currently available SLURM GPU node and build "
-            "an sbatch plan that requests all free CPUs and GPUs on that node."
+            "an sbatch plan. Pinned plans request all free CPUs/GPUs on the "
+            "selected node; flexible queue plans use the configured queued shape."
         )
     )
     parser.add_argument("--partition", action="append", default=[], help="Allowed partition; repeat or comma-separate.")
@@ -44,6 +47,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--min-gpus", type=int, default=1)
     parser.add_argument("--min-cpus", type=int, default=1)
     parser.add_argument("--min-memory-mb", type=int, default=0)
+    parser.add_argument("--queue-min-gpus", type=int, default=DEFAULT_FLEXIBLE_QUEUE_GPUS)
+    parser.add_argument("--queue-min-cpus", type=int, default=DEFAULT_FLEXIBLE_QUEUE_CPUS)
     parser.add_argument(
         "--layout",
         choices=("single-task", "one-task-per-gpu"),
@@ -85,6 +90,10 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         raise SystemExit("--min-gpus must be at least 1")
     if args.min_cpus < 1:
         raise SystemExit("--min-cpus must be at least 1")
+    if args.queue_min_gpus < 1:
+        raise SystemExit("--queue-min-gpus must be at least 1")
+    if args.queue_min_cpus < 1:
+        raise SystemExit("--queue-min-cpus must be at least 1")
     if args.run_sbatch and not args.submit_script:
         raise SystemExit("--run-sbatch requires --submit-script")
 
@@ -97,6 +106,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         min_cpus=args.min_cpus,
         min_memory_mb=args.min_memory_mb,
         layout=args.layout,
+        queue_min_gpus=args.queue_min_gpus,
+        queue_min_cpus=args.queue_min_cpus,
         gpu_weights=parse_gpu_weights(args.gpu_weight, precision_profile=args.precision_profile),
         time_limit_minutes=parse_slurm_time_limit_minutes(args.time),
         queue_mode=args.gpu_queue_mode,

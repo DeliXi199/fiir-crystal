@@ -339,10 +339,55 @@ NodeName=gpuh2002 Arch=x86_64 CoresPerSocket=48
     assert plan["sbatch"]["request"]["queue_mode"] == "flexible"
     assert plan["sbatch"]["request"]["node"] is None
     assert plan["sbatch"]["request"]["partition"] == "h200,h20,h20llm,gpu4090_8"
+    assert plan["sbatch"]["request"]["gpus"] == 8
+    assert plan["sbatch"]["request"]["cpus"] == 32
     assert "--nodelist" not in plan["sbatch"]["sbatch_args"]
     assert "--partition" in plan["sbatch"]["sbatch_args"]
     assert "h200,h20,h20llm,gpu4090_8" in plan["sbatch"]["sbatch_args"]
     assert "FIIR_GPU_QUEUE_MODE=flexible" in " ".join(plan["sbatch"]["sbatch_args"])
+
+
+def test_auto_fallback_uses_32_cpu_queue_shape_after_full_cpu_pinned_filter_fails() -> None:
+    text = """
+NodeName=gpu40902 Arch=x86_64 CoresPerSocket=16
+   CPUAlloc=32 CPUEfctv=32 CPUTot=32 CPULoad=2.00
+   Gres=gpu:rtx4090:8
+   State=ALLOCATED ThreadsPerCore=1
+   Partitions=gpu4090_8
+   RealMemory=500000 AllocMem=0 FreeMem=494715
+   CfgTRES=cpu=32,mem=500000M,billing=32,gres/gpu=8
+   AllocTRES=cpu=32,gres/gpu=8
+
+NodeName=gpuh202 Arch=x86_64 CoresPerSocket=48
+   CPUAlloc=192 CPUEfctv=192 CPUTot=192 CPULoad=2.72
+   Gres=gpu:H20:8
+   State=ALLOCATED ThreadsPerCore=2
+   Partitions=h20,h20llm
+   RealMemory=2000000 AllocMem=0 FreeMem=1522117
+   CfgTRES=cpu=192,mem=2000000M,billing=192,gres/gpu=8
+   AllocTRES=cpu=192,gres/gpu=8
+"""
+    plan = plan_gpu_job(
+        parse_scontrol_nodes(text),
+        GpuSchedulingConfig(
+            accelerator="cuda",
+            min_gpus=8,
+            min_cpus=192,
+            queue_min_gpus=8,
+            queue_min_cpus=32,
+            time_limit_minutes=240,
+        ),
+        time_limit="04:00:00",
+    )
+
+    assert plan["ready"] is True
+    assert plan["config"]["min_cpus"] == 192
+    assert plan["config"]["queue_min_cpus"] == 32
+    assert plan["config"]["effective_queue_mode"] == "flexible"
+    assert plan["selection"]["candidate_partitions"] == ["h20", "h20llm", "gpu4090_8"]
+    assert plan["sbatch"]["request"]["gpus"] == 8
+    assert plan["sbatch"]["request"]["cpus"] == 32
+    assert plan["sbatch"]["request"]["partition"] == "h20,h20llm,gpu4090_8"
 
 
 def test_h20llm_partition_uses_h20_cuda_parameters() -> None:

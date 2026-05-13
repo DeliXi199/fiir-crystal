@@ -52,11 +52,15 @@ Execution policy
   schema checks, tests, or runbook preparation, and return later to inspect
   `squeue`/`sacct` and produced artifacts.
 - For larger GPU jobs, first use the normal resource-aware GPU selection and
-  pin the best currently free eligible long-running GPU node. Queue flexibly
-  across eligible GPU partitions/nodes only when no long-running GPU node has
-  enough free resources, so SLURM can start the job on whichever eligible
-  resource becomes available first. Keep short bounded GPU sanity jobs eligible
-  for `test` only when the explicit time limit is 30 minutes or less.
+  pin the best currently free eligible GPU node. A pinned GPU plan requests all
+  currently free GPUs and CPU cores on that selected node. Queue flexibly
+  across eligible GPU partitions/nodes only when no eligible GPU node has
+  enough free resources to start now; in that queued fallback, use the broad
+  compatibility request shape of 8 GPUs and 32 CPU cores unless the workflow
+  has a documented stricter requirement. This keeps the job eligible for more
+  future nodes while still requesting actual GPUs. Keep short bounded GPU
+  sanity jobs eligible for `test` only when the explicit time limit is 30
+  minutes or less.
 - GPU jobs must request actual GPUs, not merely land on a GPU node and use CPU
   cores. For flexible larger jobs, set the requested GPU count explicitly
   through the existing wrapper/planner knobs such as `FIIR_GPU_MIN_GPUS` or
@@ -73,14 +77,14 @@ Execution policy
 - For SLURM work, prefer existing wrappers and planners under `scripts/slurm/`
   before inventing new submission commands. Use startup monitoring only for the
   early window, then leave long jobs to SLURM and inspect artifacts afterward.
-- Resource-use principle: every SLURM job must request and actually use the
-  full compute-resource shape of its target node or homogeneous partition set.
-  This applies to all submitted jobs, including smoke, debug, validation,
-  generation, training, and evaluation jobs. Configure both the SLURM request
-  and task-level concurrency so allocated CPUs, GPUs, and nodes are used rather
-  than left idle. If a workflow cannot use the full node shape, do not submit it
-  to SLURM in that form; reshape the task, choose a matching partition, or keep
-  it local only if it is lightweight and allowed by the login-node policy.
+- Resource-use principle: when a SLURM job can start on a specific currently
+  free node, it must request and actually use that node's available compute
+  shape rather than leaving free GPUs or CPU cores idle. This applies to all
+  submitted jobs, including smoke, debug, validation, generation, training, and
+  evaluation jobs. When no eligible GPU node can start the job now and the job
+  must wait in a flexible queue, use the standard 8 GPU + 32 CPU queued request
+  shape so more future GPU nodes can satisfy the job. Configure task-level
+  concurrency so the allocated resources in either case are actually used.
 
 External resources and dependencies
 -----------------------------------

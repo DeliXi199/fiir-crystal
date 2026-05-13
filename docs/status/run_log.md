@@ -1540,3 +1540,81 @@ Caveat:
 - This is an execution-policy update. It does not change the scientific
   evidence state: strict three-MLIP labels remain MLIP relaxation proxy
   evidence, not DFT evidence and not self-consistent hull-confirmed stability.
+
+## 2026-05-13: Clarify GPU Queue Resource Shape And Resubmit 64x20 Jobs
+
+Intent:
+
+- Update the SLURM resource-use rule to distinguish immediate pinned placement
+  from no-free-node queueing.
+- Replace the pending 64x20 generation jobs that were queued with a 192-CPU
+  H20/H200-only shape by broader 8 GPU + 32 CPU flexible queue submissions.
+
+Policy update:
+
+- If a GPU job can start on a specific currently free eligible node, the pinned
+  plan must request and use all currently free GPUs and CPU cores on that node.
+- If no eligible GPU node can start the job now, auto fallback uses flexible
+  queueing without `--nodelist` and requests the standard queued shape:
+  `FIIR_GPU_QUEUE_MIN_GPUS=8` and `FIIR_GPU_QUEUE_MIN_CPUS=32`.
+- This keeps jobs eligible for more future 8-GPU CUDA nodes while still
+  requesting actual GPUs. `test` remains limited to explicit time limits of 30
+  minutes or less.
+
+Implementation:
+
+- Added queue fallback request controls to the GPU planner:
+  `queue_min_gpus` / `queue_min_cpus`, CLI flags `--queue-min-gpus` /
+  `--queue-min-cpus`, and wrapper environment variables
+  `FIIR_GPU_QUEUE_MIN_GPUS` / `FIIR_GPU_QUEUE_MIN_CPUS`.
+- Updated `scripts/slurm/submit_crystalformer_bulk_gpu.sh`,
+  `scripts/slurm/plan_slurm_job.py`, `scripts/slurm/plan_gpu_job.py`,
+  `fiir_crystal/slurm_gpu_policy.py`, `fiir_crystal/slurm_scheduling.py`,
+  `AGENTS.md`, `docs/status/current_project_state.md`, and
+  `scripts/slurm/README.md`.
+- Added regression coverage showing auto fallback can use a 32-CPU queued
+  shape even when pinned placement was configured with a larger CPU threshold.
+
+SLURM actions:
+
+- Confirmed old jobs `101205`, `101206`, `101208`, and `101210` were still
+  pending, then cancelled them before they ran.
+- Resubmitted the four matched 64x20 before/after generation shards through
+  `scripts/slurm/submit_crystalformer_bulk_gpu.sh`.
+- Active replacement jobs:
+  - `101217`, `fiir-dpo64-b1-q32`: before shard 001
+  - `101220`, `fiir-dpo64-b2-q32`: before shard 002
+  - `101218`, `fiir-dpo64-a1-q32`: after shard 001
+  - `101219`, `fiir-dpo64-a2-q32`: after shard 002
+- Candidate partition set:
+  `h200,h20,h20llm,gpu4090_8,gpu4090_128`.
+- Request per active job:
+  `--gres gpu:8`, `--cpus-per-task 32`, `--time 02:00:00`, account `hmt03`,
+  conda environment `crystalformer`, JAX GPU preflight required.
+- `scontrol show job` confirmed `ReqTRES=cpu=32,...,gres/gpu=8` and
+  `TresPerTask=cpu=32` for the active jobs. Queue snapshot after resubmission:
+  `101217` pending for Resources; `101218`, `101219`, and `101220` pending for
+  Priority.
+
+Updated artifacts:
+
+- submission manifest:
+  `outputs/dpo_strict3mlip_1024_before_after/generation_64x20_seed20260513_submission_20260513/submission_manifest.json`
+- submission runbook:
+  `outputs/dpo_strict3mlip_1024_before_after/generation_64x20_seed20260513_submission_20260513/README.md`
+- new q32 plan JSON files under `outputs/slurm_gpu_plans/`
+
+Validation:
+
+- `pytest -q tests/test_slurm_gpu_policy.py tests/test_slurm_submission_template.py`
+  passed.
+- Full lightweight `pytest -q` passed.
+- `git diff --check` passed after the code and documentation updates.
+- `python -m json.tool` validated the updated submission manifest.
+
+Caveat:
+
+- This is a scheduling and provenance update only. The active jobs are still
+  pending; no new CrystalFormer generation results or MLIP validation evidence
+  exists yet. Strict three-MLIP labels remain MLIP relaxation proxy evidence,
+  not DFT evidence and not self-consistent hull-confirmed stability.

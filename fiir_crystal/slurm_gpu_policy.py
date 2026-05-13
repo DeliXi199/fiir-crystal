@@ -53,6 +53,8 @@ GPU_WEIGHT_PROFILES: dict[str, dict[str, int]] = {
 
 DEFAULT_GPU_PRECISION_PROFILE = "tf32"
 DEFAULT_GPU_WEIGHTS: dict[str, int] = dict(TF32_GPU_WEIGHTS)
+DEFAULT_FLEXIBLE_QUEUE_GPUS = 8
+DEFAULT_FLEXIBLE_QUEUE_CPUS = 32
 
 CUDA_PARTITION_HINTS = ("h200", "h20", "h800", "gpu4090", "test")
 NON_CUDA_PARTITION_HINTS = ("amd", "intel")
@@ -138,6 +140,8 @@ class GpuSchedulingConfig:
     min_memory_mb: int = 0
     layout: str = "single-task"
     exclusive_when_full_node: bool = True
+    queue_min_gpus: int = DEFAULT_FLEXIBLE_QUEUE_GPUS
+    queue_min_cpus: int = DEFAULT_FLEXIBLE_QUEUE_CPUS
     gpu_weights: Mapping[str, int] | None = None
     time_limit_minutes: int | None = None
     test_partition: str = DEFAULT_TEST_PARTITION
@@ -151,6 +155,14 @@ class GpuSchedulingConfig:
         if queue_mode not in {"auto", "pinned", "flexible"}:
             raise ValueError("GPU queue_mode must be one of: auto, pinned, flexible")
         object.__setattr__(self, "queue_mode", queue_mode)
+        if self.min_gpus < 1:
+            raise ValueError("GPU min_gpus must be at least 1")
+        if self.min_cpus < 1:
+            raise ValueError("GPU min_cpus must be at least 1")
+        if self.queue_min_gpus < 1:
+            raise ValueError("GPU queue_min_gpus must be at least 1")
+        if self.queue_min_cpus < 1:
+            raise ValueError("GPU queue_min_cpus must be at least 1")
         if self.gpu_weights is None:
             object.__setattr__(self, "gpu_weights", gpu_weights_for_profile(profile))
         else:
@@ -500,8 +512,8 @@ def build_flexible_queue_sbatch_plan(
 
     if not partitions:
         raise ValueError("flexible GPU queue plan requires at least one partition")
-    gpu_count = max(1, int(config.min_gpus))
-    cpu_count = max(1, int(config.min_cpus))
+    gpu_count = max(1, int(config.queue_min_gpus))
+    cpu_count = max(1, int(config.queue_min_cpus))
     args = [
         "--nodes",
         "1",
@@ -674,6 +686,8 @@ def config_to_dict(
         "min_memory_mb": config.min_memory_mb,
         "layout": config.layout,
         "exclusive_when_full_node": config.exclusive_when_full_node,
+        "queue_min_gpus": config.queue_min_gpus,
+        "queue_min_cpus": config.queue_min_cpus,
         "gpu_weights": effective_gpu_weights(config),
         "time_limit_minutes": config.time_limit_minutes,
         "test_partition": config.test_partition,
@@ -741,9 +755,9 @@ def queueable_gpu_nodes(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -
 def node_is_queueable(node: GpuNode, config: GpuSchedulingConfig) -> bool:
     if not _state_allows_queueing(node.state):
         return False
-    if node.total_gpus < config.min_gpus:
+    if node.total_gpus < config.queue_min_gpus:
         return False
-    if node.total_cpus < config.min_cpus:
+    if node.total_cpus < config.queue_min_cpus:
         return False
     if node.total_memory_mb < config.min_memory_mb:
         return False

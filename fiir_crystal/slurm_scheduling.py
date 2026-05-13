@@ -14,6 +14,8 @@ import subprocess
 from typing import Any, Iterable, Sequence
 
 from fiir_crystal.slurm_gpu_policy import (
+    DEFAULT_FLEXIBLE_QUEUE_CPUS,
+    DEFAULT_FLEXIBLE_QUEUE_GPUS,
     DEFAULT_GPU_PRECISION_PROFILE,
     DEFAULT_GPU_WEIGHTS,
     FP64_GPU_WEIGHTS,
@@ -552,6 +554,8 @@ def _run_command(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
 
 __all__ = [
     "CPU_PARTITION_ORDER_DEFAULT",
+    "DEFAULT_FLEXIBLE_QUEUE_CPUS",
+    "DEFAULT_FLEXIBLE_QUEUE_GPUS",
     "DEFAULT_GPU_PRECISION_PROFILE",
     "DEFAULT_GPU_WEIGHTS",
     "FP64_GPU_WEIGHTS",

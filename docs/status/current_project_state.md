@@ -47,28 +47,27 @@ decisions.
   artifacts.
 - `FIIR_GPU_QUEUE_MODE=auto` is the default GPU placement policy. Auto first
   uses the original resource-aware pinned strategy: pick the best currently
-  free eligible GPU node and submit with `--nodelist`. It falls back to
-  flexible multi-partition queueing only when no eligible long-running GPU node
-  has enough free resources.
+  free eligible GPU node and submit with `--nodelist`. The pinned plan requests
+  all currently free GPUs and CPU cores on that selected node. Auto falls back
+  to flexible multi-partition queueing only when no eligible GPU node has
+  enough free resources to start now.
 - Flexible GPU queueing records the candidate partition set and intentionally
-  does not use `--nodelist`; it requests the minimum required GPUs/CPUs and
+  does not use `--nodelist`; it requests the queued compatibility shape and
   leaves final node assignment to SLURM runtime.
 - For larger GPU work, set `FIIR_GPU_MIN_GPUS` / `--min-gpus` to the GPU count
   the job should actually use. Flexible mode still requests GPUs with `--gres`
   and must not be used as a CPU-only placement shortcut.
 - For larger CrystalFormer generation, MLIP validation, DPO smoke/evaluation,
-  and similar GPU compute jobs, request the full GPU count of the target node
-  class whenever the candidate partitions are homogeneous enough to do so. For
-  the current long-running CUDA GPU partitions used by FIIR, this generally
-  means `FIIR_GPU_MIN_GPUS=8`.
-- General resource-use rule: every SLURM job must request and actually use the
-  full compute-resource shape of its target node or homogeneous partition set.
-  This applies to all submitted jobs, including smoke, debug, validation,
-  generation, training, and evaluation jobs. Match the SLURM request with
-  task-level concurrency so allocated CPUs, GPUs, and nodes are used rather
-  than left idle. If a workflow cannot use the full node shape, reshape the
-  task, choose a matching partition, or keep it local only if it is lightweight
-  and allowed by the login-node policy.
+  and similar GPU compute jobs, request 8 GPUs on current long-running CUDA GPU
+  partitions unless the workflow has a documented smaller target partition.
+- General resource-use rule: when a SLURM job can start on a specific currently
+  free node, it must request and actually use that node's available compute
+  shape. This applies to all submitted jobs, including smoke, debug,
+  validation, generation, training, and evaluation jobs. When no eligible GPU
+  node can start the job now and the job must wait in a flexible queue, use the
+  standard queued request shape of `FIIR_GPU_QUEUE_MIN_GPUS=8` and
+  `FIIR_GPU_QUEUE_MIN_CPUS=32` so more future GPU nodes can satisfy the job.
+  Match task-level concurrency to the allocation in either case.
 - The `test` partition is considered CUDA-compatible GPU capacity and remains
   in the same resource-aware ranking as other GPU partitions. It is not
   preferred simply because a job is small; larger available GPU resources still
@@ -594,29 +593,35 @@ the project GPU SLURM wrapper and is waiting for GPU resources:
     running because they requested only `gpu:1`; they were replaced with
     whole-node GPU requests.
   - jobs `101197`, `101198`, `101200`, and `101201` were cancelled before
-    running because they requested 8 GPUs but only 32 CPUs; they were replaced
-    with homogeneous full-node H20/H200 requests.
+    running because they requested 8 GPUs but only 32 CPUs under the earlier
+    strict full-H20/H200-node interpretation.
+  - jobs `101205`, `101206`, `101208`, and `101210` were cancelled before
+    running after the queue rule was clarified: if no eligible GPU node can
+    start now, flexible queueing should use the broader 8 GPU + 32 CPU queued
+    shape rather than the 192-CPU H20/H200-only shape.
 - active submitted generation jobs:
-  - before shard 001: job `101205`, `fiir-dpo64-b1-full`, pending at submission
+  - before shard 001: job `101217`, `fiir-dpo64-b1-q32`, pending at submission
     snapshot, output root
     `outputs/dpo_strict3mlip_1024_before_after/before_64x20_seed20260513_shard_001`
-  - before shard 002: job `101206`, `fiir-dpo64-b2-full`, pending at submission
+  - before shard 002: job `101220`, `fiir-dpo64-b2-q32`, pending at submission
     snapshot, output root
     `outputs/dpo_strict3mlip_1024_before_after/before_64x20_seed20260513_shard_002`
-  - after shard 001: job `101208`, `fiir-dpo64-a1-full`, pending at submission
+  - after shard 001: job `101218`, `fiir-dpo64-a1-q32`, pending at submission
     snapshot, output root
     `outputs/dpo_strict3mlip_1024_before_after/after_64x20_seed20260513_shard_001`
-  - after shard 002: job `101210`, `fiir-dpo64-a2-full`, pending at submission
+  - after shard 002: job `101219`, `fiir-dpo64-a2-q32`, pending at submission
     snapshot, output root
     `outputs/dpo_strict3mlip_1024_before_after/after_64x20_seed20260513_shard_002`
 - scheduling policy used: `FIIR_GPU_QUEUE_MODE=auto` with an explicit
-  homogeneous long-running CUDA allowlist `h200,h20,h20llm`.
-  Because no eligible long-running GPU node had free resources at submission
-  time, the effective mode was flexible queueing across those partitions.
-- resource request per active job: `gpu:8`, 192 CPUs, `02:00:00`, account
-  `hmt03`, conda environment `crystalformer`, JAX GPU preflight required. The
-  bulk runner will see `FIIR_TOTAL_GPUS=8` and can use eight concurrent GPU
-  workers with the full H20/H200 node CPU budget.
+  long-running CUDA allowlist `h200,h20,h20llm,gpu4090_8,gpu4090_128`.
+  Because no eligible GPU node had enough free resources to start immediately,
+  the effective mode was flexible queueing across those partitions.
+- resource request per active job: `gpu:8`, 32 CPUs, `02:00:00`, account
+  `hmt03`, conda environment `crystalformer`, JAX GPU preflight required.
+  `scontrol show job` confirmed `ReqTRES=cpu=32,...,gres/gpu=8` and
+  `TresPerTask=cpu=32`. The bulk runner will see `FIIR_TOTAL_GPUS=8` and
+  `FIIR_TOTAL_CPU_CORES=32`, so it should use eight GPU workers with the
+  queued CPU budget while waiting across more eligible 8-GPU CUDA nodes.
 - optional follow-up if clean: 64 formulas x 40 samples
 - execution policy: submit only through existing SLURM wrappers or project
   submit wrappers; do not run CrystalFormer generation, MLIP validation, DFT,
