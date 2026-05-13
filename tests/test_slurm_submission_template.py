@@ -169,8 +169,7 @@ def test_slurm_readme_documents_auto_gpu_partition_selection() -> None:
     assert "flexible multi-partition queueing" in text
     assert "does not use `--nodelist`" in text
     assert "8 GPUs and 32 CPUs" in text
-    assert "smallest total memory size" in text
-    assert "500000M" in text
+    assert "256000M" in text
     assert "Omit" in text
     assert "resource-aware selection across all CUDA-compatible GPU" in text
 

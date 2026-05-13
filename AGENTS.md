@@ -84,10 +84,9 @@ Execution policy
   submitted jobs, including smoke, debug, validation, generation, training, and
   evaluation jobs. When no eligible GPU node can start the job now and the job
   must wait in a flexible queue, use the standard 8 GPU + 32 CPU queued request
-  shape plus an explicit memory request resolved from the smallest total memory
-  size among eligible queueable nodes, unless the workflow documents another
-  requirement. Configure task-level concurrency so the allocated resources in
-  either case are actually used.
+  shape plus an explicit 256G-class memory request, unless the workflow
+  documents another requirement. Configure task-level concurrency so the
+  allocated resources in either case are actually used.
 
 External resources and dependencies
 -----------------------------------

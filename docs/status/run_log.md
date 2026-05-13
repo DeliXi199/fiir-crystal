@@ -1619,6 +1619,58 @@ Caveat:
   exists yet. Strict three-MLIP labels remain MLIP relaxation proxy evidence,
   not DFT evidence and not self-consistent hull-confirmed stability.
 
+## 2026-05-13: Set No-Free-Node GPU Queue Memory To 256G
+
+Intent:
+
+- Apply the final clarified memory rule: if a specific GPU node is free now,
+  the pinned plan requests all currently free GPUs, CPU cores, and available
+  memory on that node, capped at `RealMemory`; if no eligible GPU node can
+  start now, flexible queueing uses 8 GPUs, 32 CPUs, and `256000M` memory.
+
+Implementation:
+
+- Changed `DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB` to `256000`.
+- Changed the GPU submit wrapper default `FIIR_GPU_QUEUE_MEMORY_MB` to
+  `256000`.
+- Updated SLURM docs, AGENTS rules, status docs, and scheduler tests to record
+  the 256G no-free-node fallback.
+
+SLURM actions:
+
+- Jobs `101274`, `101275`, `101276`, and `101277` were still pending with the
+  prior 512G-class memory request and were cancelled before running.
+- Resubmitted the four matched 64x20 before/after generation shards through
+  `scripts/slurm/submit_crystalformer_bulk_gpu.sh`.
+- Active replacement jobs:
+  - `101278`, `fiir-dpo64-b1-m256`: before shard 001
+  - `101279`, `fiir-dpo64-b2-m256`: before shard 002
+  - `101280`, `fiir-dpo64-a1-m256`: after shard 001
+  - `101281`, `fiir-dpo64-a2-m256`: after shard 002
+- Candidate partition set:
+  `h200,h20,h20llm,gpu4090_8,gpu4090_128`.
+- Request per active job:
+  `--gres gpu:8`, `--cpus-per-task 32`, `--mem 256000M`,
+  `--time 02:00:00`, account `hmt03`, conda environment `crystalformer`, JAX
+  GPU preflight required.
+- `scontrol show job 101278` confirmed
+  `ReqTRES=cpu=32,mem=250G,node=1,billing=32,gres/gpu=8` and
+  `TresPerTask=cpu=32`. Queue snapshot after resubmission:
+  `101278` pending for Resources; `101279`, `101280`, and `101281` pending for
+  Priority.
+
+Validation:
+
+- `pytest -q tests/test_slurm_gpu_policy.py tests/test_slurm_submission_template.py`
+  passed with 28 tests.
+
+Caveat:
+
+- This is a scheduling and provenance update only. The active jobs are still
+  pending; no new CrystalFormer generation results or MLIP validation evidence
+  exists yet. Strict three-MLIP labels remain MLIP relaxation proxy evidence,
+  not DFT evidence and not self-consistent hull-confirmed stability.
+
 ## 2026-05-13: Refine GPU Queue Memory Request
 
 Intent:
@@ -1678,3 +1730,26 @@ Caveat:
   pending; no new CrystalFormer generation results or MLIP validation evidence
   exists yet. Strict three-MLIP labels remain MLIP relaxation proxy evidence,
   not DFT evidence and not self-consistent hull-confirmed stability.
+
+## 2026-05-13: Current GPU Queue Memory Correction
+
+- The later active SLURM state supersedes the auto-memory `500000M` submission
+  above: jobs `101268`, `101269`, `101270`, and `101271` are no longer active.
+- The interim 512G-class jobs `101274`, `101275`, `101276`, and `101277` were
+  still pending and were cancelled before running.
+- Active jobs are now `101278`, `101279`, `101280`, and `101281`, all submitted
+  through `scripts/slurm/submit_crystalformer_bulk_gpu.sh` with
+  `--gres gpu:8`, `--cpus-per-task 32`, `--mem 256000M`, and `--time 02:00:00`
+  on `h200,h20,h20llm,gpu4090_8,gpu4090_128`.
+- `scontrol show job 101278` confirmed
+  `ReqTRES=cpu=32,mem=250G,node=1,billing=32,gres/gpu=8` and
+  `TresPerTask=cpu=32`.
+- `pytest -q tests/test_slurm_gpu_policy.py tests/test_slurm_submission_template.py`
+  passed with 28 tests after the 256G default change.
+- Full lightweight `pytest -q` passed.
+- `git diff --check` passed.
+- `python -m json.tool` validated the updated submission manifest.
+- This remains scheduling provenance only; no new generated candidates or MLIP
+  validation evidence exists yet. Strict three-MLIP labels remain MLIP
+  relaxation proxy evidence, not DFT evidence and not self-consistent
+  hull-confirmed stability.

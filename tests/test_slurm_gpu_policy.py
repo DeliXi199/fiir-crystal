@@ -368,12 +368,12 @@ NodeName=gpuh2002 Arch=x86_64 CoresPerSocket=48
     assert plan["sbatch"]["request"]["partition"] == "h200,h20,h20llm,gpu4090_8"
     assert plan["sbatch"]["request"]["gpus"] == 8
     assert plan["sbatch"]["request"]["cpus"] == 32
-    assert plan["sbatch"]["request"]["memory_mb"] == 500_000
+    assert plan["sbatch"]["request"]["memory_mb"] == 256_000
     assert "--nodelist" not in plan["sbatch"]["sbatch_args"]
     assert "--partition" in plan["sbatch"]["sbatch_args"]
     assert "h200,h20,h20llm,gpu4090_8" in plan["sbatch"]["sbatch_args"]
     assert "--mem" in plan["sbatch"]["sbatch_args"]
-    assert "500000M" in plan["sbatch"]["sbatch_args"]
+    assert "256000M" in plan["sbatch"]["sbatch_args"]
     assert "FIIR_GPU_QUEUE_MODE=flexible" in " ".join(plan["sbatch"]["sbatch_args"])
 
 
@@ -413,12 +413,12 @@ NodeName=gpuh202 Arch=x86_64 CoresPerSocket=48
     assert plan["ready"] is True
     assert plan["config"]["min_cpus"] == 192
     assert plan["config"]["queue_min_cpus"] == 32
-    assert plan["config"]["queue_memory_mb"] == 500_000
+    assert plan["config"]["queue_memory_mb"] == 256_000
     assert plan["config"]["effective_queue_mode"] == "flexible"
     assert plan["selection"]["candidate_partitions"] == ["h20", "h20llm", "gpu4090_8"]
     assert plan["sbatch"]["request"]["gpus"] == 8
     assert plan["sbatch"]["request"]["cpus"] == 32
-    assert plan["sbatch"]["request"]["memory_mb"] == 500_000
+    assert plan["sbatch"]["request"]["memory_mb"] == 256_000
     assert plan["sbatch"]["request"]["partition"] == "h20,h20llm,gpu4090_8"
 
 
@@ -467,8 +467,8 @@ NodeName=gpu40902 Arch=x86_64 CoresPerSocket=16
    Gres=gpu:rtx4090:8
    State=ALLOCATED ThreadsPerCore=1
    Partitions=gpu4090_8
-   RealMemory=500000 AllocMem=0 FreeMem=494715
-   CfgTRES=cpu=32,mem=500000M,billing=32,gres/gpu=8
+   RealMemory=512000 AllocMem=0 FreeMem=494715
+   CfgTRES=cpu=32,mem=512000M,billing=32,gres/gpu=8
    AllocTRES=cpu=32,gres/gpu=8
 """
     plan = plan_gpu_job(

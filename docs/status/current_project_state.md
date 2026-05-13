@@ -67,11 +67,9 @@ decisions.
   node can start the job now and the job must wait in a flexible queue, use the
   standard queued request shape of `FIIR_GPU_QUEUE_MIN_GPUS=8` and
   `FIIR_GPU_QUEUE_MIN_CPUS=32`, plus an explicit right-sized memory request
-  auto-resolved from the smallest total memory size among eligible queueable
-  nodes. For the current `h200,h20,h20llm,gpu4090_8,gpu4090_128` set this
-  resolves to `500000M`, so more future GPU nodes can satisfy the job instead
-  of inheriting a 2TB full-node memory default. Match task-level concurrency to
-  the allocation in either case.
+  `FIIR_GPU_QUEUE_MEMORY_MB=256000`, so future GPU nodes can satisfy the job
+  without inheriting a 2TB full-node memory default. Match task-level
+  concurrency to the allocation in either case.
 - The `test` partition is considered CUDA-compatible GPU capacity and remains
   in the same resource-aware ranking as other GPU partitions. It is not
   preferred simply because a job is small; larger available GPU resources still
@@ -609,17 +607,22 @@ the project GPU SLURM wrapper and is waiting for GPU resources:
   - jobs `101253`, `101254`, `101255`, and `101256` were cancelled before
     running after the queue memory policy was refined from a fixed 256GB to the
     minimum memory of the currently eligible queueable GPU nodes.
+  - jobs `101268`, `101269`, `101270`, and `101271` were cancelled before
+    running after that auto-memory policy was superseded.
+  - jobs `101274`, `101275`, `101276`, and `101277` were cancelled before
+    running after the no-free-node flexible queue fallback was changed from
+    512G-class memory to 256G-class memory.
 - active submitted generation jobs:
-  - before shard 001: job `101268`, `fiir-dpo64-b1-auto`, pending at submission
+  - before shard 001: job `101278`, `fiir-dpo64-b1-m256`, pending at submission
     snapshot, output root
     `outputs/dpo_strict3mlip_1024_before_after/before_64x20_seed20260513_shard_001`
-  - before shard 002: job `101270`, `fiir-dpo64-b2-auto`, pending at submission
+  - before shard 002: job `101279`, `fiir-dpo64-b2-m256`, pending at submission
     snapshot, output root
     `outputs/dpo_strict3mlip_1024_before_after/before_64x20_seed20260513_shard_002`
-  - after shard 001: job `101269`, `fiir-dpo64-a1-auto`, pending at submission
+  - after shard 001: job `101280`, `fiir-dpo64-a1-m256`, pending at submission
     snapshot, output root
     `outputs/dpo_strict3mlip_1024_before_after/after_64x20_seed20260513_shard_001`
-  - after shard 002: job `101271`, `fiir-dpo64-a2-auto`, pending at submission
+  - after shard 002: job `101281`, `fiir-dpo64-a2-m256`, pending at submission
     snapshot, output root
     `outputs/dpo_strict3mlip_1024_before_after/after_64x20_seed20260513_shard_002`
 - scheduling policy used: `FIIR_GPU_QUEUE_MODE=auto` with an explicit
@@ -628,9 +631,9 @@ the project GPU SLURM wrapper and is waiting for GPU resources:
   the effective mode was flexible queueing across those partitions.
 - resource request per active job: `gpu:8`, 32 CPUs, `02:00:00`, account
   `hmt03`, conda environment `crystalformer`, JAX GPU preflight required.
-  Flexible queue memory auto-resolved to the minimum total memory among the
-  current eligible queueable nodes, `500000M` from `gpu4090_8`. `scontrol show
-  job 101268` confirmed `ReqTRES=cpu=32,mem=500000M,node=1,billing=32,gres/gpu=8`
+  No-free-node flexible queue memory is now `FIIR_GPU_QUEUE_MEMORY_MB=256000`.
+  `scontrol show job 101278` confirmed
+  `ReqTRES=cpu=32,mem=250G,node=1,billing=32,gres/gpu=8`
   and `TresPerTask=cpu=32`. The bulk runner will see `FIIR_TOTAL_GPUS=8` and
   `FIIR_TOTAL_CPU_CORES=32`, so it should use eight GPU workers with the
   queued CPU budget while waiting across more eligible 8-GPU CUDA nodes.

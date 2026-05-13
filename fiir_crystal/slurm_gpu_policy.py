@@ -9,7 +9,7 @@ sizing, not as default ranking signals.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import re
 import shlex
 import subprocess
@@ -55,7 +55,7 @@ DEFAULT_GPU_PRECISION_PROFILE = "tf32"
 DEFAULT_GPU_WEIGHTS: dict[str, int] = dict(TF32_GPU_WEIGHTS)
 DEFAULT_FLEXIBLE_QUEUE_GPUS = 8
 DEFAULT_FLEXIBLE_QUEUE_CPUS = 32
-DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB = 0
+DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB = 256_000
 
 CUDA_PARTITION_HINTS = ("h200", "h20", "h800", "gpu4090", "test")
 NON_CUDA_PARTITION_HINTS = ("amd", "intel")
@@ -606,17 +606,16 @@ def plan_gpu_job(
                 "selection": None,
                 "sbatch": None,
             }
-        queue_config = resolve_flexible_queue_config(nodes, config)
         sbatch = build_flexible_queue_sbatch_plan(
             partitions,
-            queue_config,
-            layout=queue_config.layout,
+            config,
+            layout=config.layout,
             **sbatch_kwargs,
         )
         return {
             "ready": True,
             "reason": "flexible_gpu_queue_across_candidate_partitions",
-            "config": config_to_dict(queue_config, effective_queue_mode_override="flexible"),
+            "config": config_to_dict(config, effective_queue_mode_override="flexible"),
             "selection": {
                 "selected_node": None,
                 "selected_partition": ",".join(partitions),
@@ -647,17 +646,16 @@ def plan_gpu_job(
     if config.queue_mode == "auto":
         partitions = flexible_queue_partitions(nodes, config)
         if partitions:
-            queue_config = resolve_flexible_queue_config(nodes, config)
             sbatch = build_flexible_queue_sbatch_plan(
                 partitions,
-                queue_config,
-                layout=queue_config.layout,
+                config,
+                layout=config.layout,
                 **sbatch_kwargs,
             )
             return {
                 "ready": True,
                 "reason": "no_free_gpu_resources_flexible_queue_across_candidate_partitions",
-                "config": config_to_dict(queue_config, effective_queue_mode_override="flexible"),
+                "config": config_to_dict(config, effective_queue_mode_override="flexible"),
                 "selection": {
                     "selected_node": None,
                     "selected_partition": ",".join(partitions),
@@ -717,30 +715,6 @@ def effective_queue_mode(config: GpuSchedulingConfig) -> str:
     if config.queue_mode != "auto":
         return config.queue_mode
     return "pinned_then_flexible_on_no_free_gpu"
-
-
-def resolve_flexible_queue_config(
-    nodes: Sequence[GpuNode],
-    config: GpuSchedulingConfig,
-) -> GpuSchedulingConfig:
-    if config.queue_memory_mb > 0:
-        return config
-    memory_mb = flexible_queue_memory_mb(nodes, config)
-    if memory_mb <= 0:
-        return config
-    return replace(config, queue_memory_mb=memory_mb)
-
-
-def flexible_queue_memory_mb(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -> int:
-    partitions = set(flexible_queue_partitions(nodes, config))
-    if not partitions:
-        return 0
-    memories = [
-        node.total_memory_mb
-        for node in queueable_gpu_nodes(nodes, config)
-        if node.total_memory_mb > 0 and partitions.intersection(node.partitions)
-    ]
-    return min(memories) if memories else 0
 
 
 def flexible_queue_partitions(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -> tuple[str, ...]:

@@ -66,9 +66,7 @@ job only writes a bulk plan or validation summary. It exports
 the default `auto` queue mode, it requests all currently free GPUs and CPU cores
 when the planner can pin a specific free node. If no eligible GPU node can
 start now, it queues without `--nodelist` using the broad fallback request of 8
-GPUs, 32 CPUs, and the smallest total memory size among the currently eligible
-queueable nodes. For the current `h200,h20,h20llm,gpu4090_8,gpu4090_128` queue
-set, that resolves to 500000M from `gpu4090_8`. The explicit memory request
+GPUs, 32 CPUs, and 256000M memory by default. The explicit memory request
 avoids SLURM expanding a broad multi-partition queue job to a full-node memory
 request such as 2000000M. In both modes it passes `FIIR_TOTAL_GPUS` plus
 `CUDA_VISIBLE_DEVICES` into the bulk runner. The runner then assigns one
@@ -108,8 +106,8 @@ Useful GPU submitter overrides:
   32 CPUs. This fallback is intentionally broader than a 192-CPU H20/H200-only
   request so the job can queue across more 8-GPU CUDA nodes while it waits.
 - `FIIR_GPU_QUEUE_MEMORY_MB`: explicit flexible queue memory request. Default
-  `0` means auto: request the smallest total memory size among the eligible
-  queueable nodes. Override it when a workflow needs a different memory cap.
+  `256000` requests 256G-class memory for no-free-node flexible queueing.
+  Override it when a workflow needs a different memory cap.
 - `FIIR_GPU_QUEUE_MODE`: `auto`, `pinned`, or `flexible`. Default `auto`
   first uses pinned placement on the best currently free eligible GPU node,
   then falls back to flexible multi-partition queueing only when no eligible
@@ -252,15 +250,14 @@ mode, the planner first uses the original resource-aware pinned strategy: pick
 the best currently free eligible GPU node and submit with `--nodelist`. Only
 when no eligible GPU node has enough free GPUs/CPUs to start now does auto fall
 back to flexible multi-partition queueing. Flexible mode does not use `--nodelist`;
-it requests the queued compatibility shape, 8 GPUs, 32 CPUs, and an auto
-resolved memory request based on the eligible queueable nodes by default, and
-lets SLURM start the job on whichever eligible partition/node becomes available
-first. Set `FIIR_GPU_MIN_GPUS` to the GPU count the job should actually consume
-for pinned eligibility; set `FIIR_GPU_QUEUE_MIN_GPUS` and
+it requests the queued compatibility shape, 8 GPUs, 32 CPUs, and 256000M memory
+by default, and lets SLURM start the job on whichever eligible partition/node
+becomes available first. Set `FIIR_GPU_MIN_GPUS` to the GPU count the job should
+actually consume for pinned eligibility; set `FIIR_GPU_QUEUE_MIN_GPUS` and
 `FIIR_GPU_QUEUE_MIN_CPUS` only when the flexible queued shape needs an explicit
 override. Set `FIIR_GPU_QUEUE_MEMORY_MB` when the workflow needs more or less
-than the auto-resolved memory. Flexible mode still requests GPUs with `--gres`
-and must not be used as a CPU-only placement shortcut.
+than the default 256G-class memory. Flexible mode still requests GPUs with
+`--gres` and must not be used as a CPU-only placement shortcut.
 
 The `test` partition is part of the CUDA-compatible GPU policy and uses the
 same resource-aware ranking as every other GPU partition. It is not preferred
@@ -313,8 +310,7 @@ Useful options:
 - `--min-gpus`, `--min-cpus`, `--min-memory-mb`: minimum remaining resources.
 - `--queue-min-gpus`, `--queue-min-cpus`: flexible queue request shape used
   when no eligible node can start now; defaults are 8 GPUs and 32 CPUs.
-- `--queue-memory-mb`: flexible queue memory request; default `0` auto-resolves
-  to the smallest total memory size among eligible queueable nodes.
+- `--queue-memory-mb`: flexible queue memory request; default is 256000 MB.
 - `--gpu-weight h200=650`: override the active profile's per-GPU ranking weight.
 - `--print-json`: print the full deterministic plan.
 - `--run-sbatch`: submit the planned command; off by default.
