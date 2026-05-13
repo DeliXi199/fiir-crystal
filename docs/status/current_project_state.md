@@ -65,6 +65,21 @@ decisions.
 - Verification passed:
   `pytest -q tests/test_f4_novelty_import.py tests/test_f4_novelty_audit_plan.py tests/test_f4_reference_pool_manifest.py`
   and `pytest -q`.
+- Current F4 execution state:
+  - Plan exists:
+    `outputs/f4_novelty_audit/reference_pool_v1/f4_audit_plan.json`
+  - Task rows: 1024 candidates, 64 formulas, 16 shards x 64 rows.
+  - Skipped candidates: 0.
+  - Readiness check output:
+    `outputs/f4_novelty_audit/reference_pool_v1/readiness_summary.json`
+  - Readiness is currently false only because
+    `outputs/f4_novelty_audit/reference_pool_v1/reference_pool_manifest.json`
+    is missing.
+  - Local scan found `external/CrystalFormer/data/mini.csv` with example CIF
+    rows, but no full local Alex-20s/training-set, Materials Project, ICSD, or
+    GNoME structure snapshot suitable for production F4 reference use.
+  - Do not build production `reference_pool_v1` from `mini.csv`; it is only a
+    tiny example dataset and would understate leakage risk.
 
 ## SLURM GPU Scheduling Policy
 

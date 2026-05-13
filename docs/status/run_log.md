@@ -27,6 +27,25 @@ outputs.
   `pytest -q tests/test_f4_novelty_import.py tests/test_f4_novelty_audit_plan.py tests/test_f4_reference_pool_manifest.py`
   and `pytest -q` passed.
 
+Follow-up execution:
+
+- Confirmed candidate index exists:
+  `outputs/mlip_validation_three_mlip_1024_20260513_batch/candidate_index.jsonl`
+  with 1024 rows.
+- F4 audit plan is already materialized at
+  `outputs/f4_novelty_audit/reference_pool_v1/f4_audit_plan.json`.
+- Plan shape: 1024 selected tasks, 64 formulas, 16 shards with 64 rows each,
+  0 skipped candidates.
+- Re-ran readiness check:
+  `python scripts/check_f4_novelty_audit_ready.py --plan-json outputs/f4_novelty_audit/reference_pool_v1/f4_audit_plan.json --output-json outputs/f4_novelty_audit/reference_pool_v1/readiness_summary.json`
+- Readiness result: not ready only because
+  `outputs/f4_novelty_audit/reference_pool_v1/reference_pool_manifest.json`
+  is missing.
+- Local reference scan found only `external/CrystalFormer/data/mini.csv` as an
+  example CIF-bearing dataset, not a production-scale Alex-20s/training-set,
+  MP, ICSD, or GNoME reference snapshot. Do not use `mini.csv` as production
+  F4 reference evidence.
+
 ## 2026-05-12: Guidance Consolidation And F1-F5 Alignment
 
 - Removed `docs/guidance/00_reading_order.md`.
