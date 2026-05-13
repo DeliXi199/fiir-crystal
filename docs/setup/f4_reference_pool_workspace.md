@@ -9,7 +9,8 @@ It does not build databases or run structure matching.
 The FIIR core project does not:
 
 - does not run StructureMatcher or pymatgen;
-- download Materials Project, ICSD, Alexandria, GNoME, or training-set data;
+- download Materials Project, ICSD, Alexandria, GNoME, or training-set data from
+  inside the core package or F4 planning/import scripts;
 - call external APIs;
 - install database clients or ML/structure-matching dependencies;
 - write into live CrystalFormer generation directories.
@@ -28,6 +29,9 @@ outputs/f4_novelty_audit/reference_pool_v1/
   reference_pool_manifest.json
   report.md
   references/
+    alex20_train_snapshot.structures.jsonl
+    alex20_val_snapshot.structures.jsonl
+    alex20_test_snapshot.structures.jsonl
     materials_project_snapshot.structures.jsonl
     training_set_snapshot.structures.jsonl
   shards/
@@ -94,7 +98,8 @@ A real manifest must use this shape:
 All paths should point to local files. The manifest is provenance, not a
 download recipe.
 
-Prepare a local CSV with CIF text/path fields as a reference source JSONL:
+Prepare a local CSV with CIF text/path or inline structure fields as a reference
+source JSONL:
 
 ```bash
 python scripts/prepare_f4_reference_source.py \
@@ -108,12 +113,28 @@ after they have been obtained. Do not treat `external/CrystalFormer/data/mini.cs
 as production F4 evidence; it is a tiny example file and is not the Alex-20s
 training snapshot.
 
+For the downloaded Alex-20 Hugging Face snapshot, keep the raw dataset under the
+gitignored `external/datasets/` tree and omit complete source rows to avoid
+duplicating large inline structure strings:
+
+```bash
+python scripts/prepare_f4_reference_source.py \
+  --input-csv external/datasets/reference_pool_v1/raw/alex20_hf/alex20/train.csv \
+  --source-name alex20_train_snapshot \
+  --output-jsonl outputs/f4_novelty_audit/reference_pool_v1/references/alex20_train_snapshot.structures.jsonl \
+  --omit-raw-row
+```
+
+Repeat for `val.csv` and `test.csv` with source names
+`alex20_val_snapshot` and `alex20_test_snapshot`.
+
 Build a real manifest from local reference JSONL files:
 
 ```bash
 python scripts/build_f4_reference_pool_manifest.py \
-  --reference-source materials_project_snapshot=outputs/f4_novelty_audit/reference_pool_v1/references/materials_project_snapshot.structures.jsonl \
-  --reference-source training_set_snapshot=outputs/f4_novelty_audit/reference_pool_v1/references/training_set_snapshot.structures.jsonl \
+  --reference-source alex20_train_snapshot=outputs/f4_novelty_audit/reference_pool_v1/references/alex20_train_snapshot.structures.jsonl \
+  --reference-source alex20_val_snapshot=outputs/f4_novelty_audit/reference_pool_v1/references/alex20_val_snapshot.structures.jsonl \
+  --reference-source alex20_test_snapshot=outputs/f4_novelty_audit/reference_pool_v1/references/alex20_test_snapshot.structures.jsonl \
   --reference-pool-id reference_pool_v1 \
   --output-json outputs/f4_novelty_audit/reference_pool_v1/reference_pool_manifest.json
 ```

@@ -57,6 +57,42 @@ def test_prepare_f4_reference_source_from_inline_cif_csv(tmp_path: Path) -> None
     assert read_json(output_jsonl.with_suffix(".report.json"))["local_only"] is True
 
 
+def test_prepare_f4_reference_source_from_inline_structure_csv_can_omit_raw_row(tmp_path: Path) -> None:
+    source_csv = tmp_path / "alex20_like.csv"
+    output_jsonl = tmp_path / "references" / "alex20_like.structures.jsonl"
+    structure = '{"@module": "pymatgen.core.structure", "@class": "Structure"}'
+    with source_csv.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["mat_id", "formula", "structure", "e_above_hull"])
+        writer.writeheader()
+        writer.writerow(
+            {
+                "mat_id": "agm000001",
+                "formula": "BaTiO3",
+                "structure": structure,
+                "e_above_hull": "0.0",
+            }
+        )
+
+    prepare_reference_main(
+        [
+            "--input-csv",
+            str(source_csv),
+            "--output-jsonl",
+            str(output_jsonl),
+            "--source-name",
+            "alex20_train_snapshot",
+            "--omit-raw-row",
+        ]
+    )
+
+    rows = read_jsonl(output_jsonl)
+    assert rows[0]["reference_id"] == "agm000001"
+    assert rows[0]["structure_format"] == "structure_inline"
+    assert rows[0]["structure_ref"] == structure
+    assert "raw_row" not in rows[0]["metadata"]
+    assert read_json(output_jsonl.with_suffix(".report.json"))["omits_raw_row"] is True
+
+
 def test_prepare_f4_reference_source_enables_smoke_readiness(tmp_path: Path) -> None:
     candidate_index = tmp_path / "candidate_index.jsonl"
     source_csv = tmp_path / "mini.csv"
@@ -113,7 +149,7 @@ def test_prepare_f4_reference_source_rejects_rows_without_structure(tmp_path: Pa
         writer.writeheader()
         writer.writerow({"material_id": "mp-1", "pretty_formula": "BaTiO3"})
 
-    with pytest.raises(SystemExit, match="has no CIF text/path"):
+    with pytest.raises(SystemExit, match="has no CIF/structure text/path"):
         prepare_reference_main(
             [
                 "--input-csv",

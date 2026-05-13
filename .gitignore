@@ -15,6 +15,7 @@ external/CrystalFormer/wandb/
 external/CrystalFormer/runs/
 external/CrystalFormer/logs/
 external/checkpoints/
+external/datasets/
 outputs/crystalformer_raw/
 outputs/crystalformer_run/
 outputs/crystalformer_audit/

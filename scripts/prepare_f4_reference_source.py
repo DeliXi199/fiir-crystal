@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Prepare local CSV/CIF rows as an F4 reference source JSONL.
+"""Prepare local CSV/structure rows as an F4 reference source JSONL.
 
 This script only reshapes existing local files into the manifest-friendly
 `structure_jsonl` format. It does not parse structures, run StructureMatcher,
@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 import platform
 import socket
 import sys
@@ -22,19 +23,20 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from fiir_crystal.io import write_json, write_jsonl
+from fiir_crystal.io import write_json
 
 
 DEFAULT_ID_FIELDS = ("reference_id", "material_id", "mat_id", "id", "candidate_id")
 DEFAULT_FORMULA_FIELDS = ("formula", "pretty_formula", "composition", "target_formula")
 DEFAULT_CIF_FIELDS = ("cif", "cif_string", "structure_cif")
 DEFAULT_CIF_PATH_FIELDS = ("cif_path", "cif_file", "cif_filename", "structure_path", "path")
+DEFAULT_STRUCTURE_FIELDS = ("structure", "structure_dict", "pymatgen_structure", "structure_json")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Convert an existing local CSV with CIF text/path columns into an F4 "
+            "Convert an existing local CSV with CIF/structure text/path columns into an F4 "
             "reference structure JSONL. This is a data-shaping helper only."
         )
     )
@@ -46,9 +48,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--formula-field")
     parser.add_argument("--cif-field")
     parser.add_argument("--cif-path-field")
+    parser.add_argument("--structure-field")
     parser.add_argument("--id-prefix")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--allow-missing-structure", action="store_true")
+    parser.add_argument(
+        "--omit-raw-row",
+        action="store_true",
+        help="Do not copy the complete source CSV row into metadata; useful for large inline structure fields.",
+    )
     return parser.parse_args(argv)
 
 
@@ -61,37 +69,46 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     if not input_csv.exists():
         raise SystemExit(f"input CSV does not exist: {input_csv}")
 
-    csv_rows = _read_csv(input_csv)
-    rows = csv_rows[: args.limit] if args.limit is not None else csv_rows
-    converted: list[dict[str, Any]] = []
+    input_row_count = 0
+    converted_row_count = 0
     skipped_missing_structure = 0
-    for index, row in enumerate(rows, start=1):
-        item = _convert_row(
-            row,
-            row_index=index,
-            input_csv=input_csv,
-            source_name=args.source_name,
-            reference_id_field=args.reference_id_field,
-            formula_field=args.formula_field,
-            cif_field=args.cif_field,
-            cif_path_field=args.cif_path_field,
-            id_prefix=args.id_prefix,
-        )
-        if not item["structure_ref"]:
-            skipped_missing_structure += 1
-            if not args.allow_missing_structure:
-                raise SystemExit(f"row {index} has no CIF text/path structure field")
-        converted.append(item)
-
     output_jsonl = Path(args.output_jsonl)
-    write_jsonl(output_jsonl, converted)
+    output_jsonl.parent.mkdir(parents=True, exist_ok=True)
+    with input_csv.open("r", encoding="utf-8", newline="") as source, output_jsonl.open(
+        "w", encoding="utf-8"
+    ) as destination:
+        reader = csv.DictReader(source)
+        for index, row in enumerate(reader, start=1):
+            if args.limit is not None and index > args.limit:
+                break
+            input_row_count += 1
+            item = _convert_row(
+                row,
+                row_index=index,
+                input_csv=input_csv,
+                source_name=args.source_name,
+                reference_id_field=args.reference_id_field,
+                formula_field=args.formula_field,
+                cif_field=args.cif_field,
+                cif_path_field=args.cif_path_field,
+                structure_field=args.structure_field,
+                id_prefix=args.id_prefix,
+                omit_raw_row=args.omit_raw_row,
+            )
+            if not item["structure_ref"]:
+                skipped_missing_structure += 1
+                if not args.allow_missing_structure:
+                    raise SystemExit(f"row {index} has no CIF/structure text/path field")
+            destination.write(json.dumps(item, sort_keys=True) + "\n")
+            converted_row_count += 1
+
     summary = {
         "workflow": "prepare_f4_reference_source",
         "source_name": args.source_name,
         "input_csv": str(input_csv),
         "output_jsonl": str(output_jsonl),
-        "input_row_count": len(csv_rows),
-        "converted_row_count": len(converted),
+        "input_row_count": input_row_count,
+        "converted_row_count": converted_row_count,
         "skipped_missing_structure": skipped_missing_structure,
         "created_time_utc": datetime.now(timezone.utc).isoformat(),
         "input_sha256": _sha256(input_csv),
@@ -102,6 +119,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         "runs_database_query": False,
         "calls_external_apis": False,
         "downloads": False,
+        "omits_raw_row": args.omit_raw_row,
         "environment": {
             "python_version": sys.version.split()[0],
             "platform": platform.platform(),
@@ -132,7 +150,9 @@ def _convert_row(
     formula_field: str | None,
     cif_field: str | None,
     cif_path_field: str | None,
+    structure_field: str | None,
     id_prefix: str | None,
+    omit_raw_row: bool,
 ) -> dict[str, Any]:
     reference_id = _first_value(row, *((reference_id_field,) if reference_id_field else DEFAULT_ID_FIELDS))
     if reference_id is None:
@@ -141,6 +161,7 @@ def _convert_row(
     formula = _first_value(row, *((formula_field,) if formula_field else DEFAULT_FORMULA_FIELDS))
     cif_text = _first_value(row, *((cif_field,) if cif_field else DEFAULT_CIF_FIELDS))
     cif_path_value = _first_value(row, *((cif_path_field,) if cif_path_field else DEFAULT_CIF_PATH_FIELDS))
+    structure_text = _first_value(row, *((structure_field,) if structure_field else DEFAULT_STRUCTURE_FIELDS))
     structure_ref = None
     structure_format = None
     if cif_text:
@@ -149,13 +170,17 @@ def _convert_row(
     elif cif_path_value:
         structure_ref = str(_resolve(input_csv.parent, cif_path_value))
         structure_format = "cif_path"
+    elif structure_text:
+        structure_ref = structure_text
+        structure_format = "structure_inline"
 
     metadata = {
         "source_csv": str(input_csv),
         "source_row_index": row_index,
         "source_name": source_name,
-        "raw_row": dict(row),
     }
+    if not omit_raw_row:
+        metadata["raw_row"] = dict(row)
     return {
         "reference_id": str(reference_id),
         "formula": None if formula in (None, "") else str(formula),
@@ -164,12 +189,6 @@ def _convert_row(
         "structure_format": structure_format,
         "metadata": metadata,
     }
-
-
-def _read_csv(path: Path) -> list[dict[str, str]]:
-    with path.open("r", encoding="utf-8", newline="") as handle:
-        return [dict(row) for row in csv.DictReader(handle)]
-
 
 def _first_value(row: dict[str, str], *keys: str | None) -> str | None:
     for key in keys:
@@ -202,6 +221,7 @@ def _render_report(summary: dict[str, Any]) -> str:
             f"- input_row_count: {summary['input_row_count']}",
             f"- converted_row_count: {summary['converted_row_count']}",
             f"- skipped_missing_structure: {summary['skipped_missing_structure']}",
+            f"- omits_raw_row: {summary['omits_raw_row']}",
             "",
         ]
     )

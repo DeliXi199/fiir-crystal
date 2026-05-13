@@ -70,16 +70,34 @@ decisions.
     `outputs/f4_novelty_audit/reference_pool_v1/f4_audit_plan.json`
   - Task rows: 1024 candidates, 64 formulas, 16 shards x 64 rows.
   - Skipped candidates: 0.
+  - Alex-20 has been downloaded from Hugging Face dataset `zdcao/alex-20` into
+    the gitignored local directory
+    `external/datasets/reference_pool_v1/raw/alex20_hf/`.
+  - Raw Alex-20 files:
+    `alex20/train.csv` with 1,071,694 rows,
+    `alex20/val.csv` with 133,962 rows,
+    `alex20/test.csv` with 133,962 rows, plus
+    `convex_hull_pbe_2023.12.29.json.bz2`.
+  - Prepared production-scale Alex-20 reference JSONL sources:
+    `outputs/f4_novelty_audit/reference_pool_v1/references/alex20_train_snapshot.structures.jsonl`,
+    `outputs/f4_novelty_audit/reference_pool_v1/references/alex20_val_snapshot.structures.jsonl`,
+    and
+    `outputs/f4_novelty_audit/reference_pool_v1/references/alex20_test_snapshot.structures.jsonl`.
+  - Production `reference_pool_v1` manifest exists:
+    `outputs/f4_novelty_audit/reference_pool_v1/reference_pool_manifest.json`
+    with 3 sources, 1,339,618 total references, 0 duplicate reference ids, and
+    0 missing reference ids.
   - Readiness check output:
     `outputs/f4_novelty_audit/reference_pool_v1/readiness_summary.json`
-  - Readiness is currently false only because
-    `outputs/f4_novelty_audit/reference_pool_v1/reference_pool_manifest.json`
-    is missing.
-  - Local scan found `external/CrystalFormer/data/mini.csv` with example CIF
-    rows, but no full local Alex-20s/training-set, Materials Project, ICSD, or
-    GNoME structure snapshot suitable for production F4 reference use.
-  - Do not build production `reference_pool_v1` from `mini.csv`; it is only a
-    tiny example dataset and would understate leakage risk.
+    and reports ready true for plan/tasks/reference-pool presence.
+  - `reference_pool_v1` currently covers Alex-20 only. Materials Project,
+    GNoME, and ICSD snapshots are not staged; MP/GNoME need a chosen source or
+    API/export path, and ICSD requires a licensed local export. Do not build
+    production F4 conclusions as "all known materials" until those sources are
+    added.
+  - Download provenance is recorded locally at
+    `external/datasets/reference_pool_v1/provenance/alex20_hf_download.json`.
+    `external/datasets/` and `outputs/` are intentionally not committed.
 - F4 smoke reference state:
   - Added `scripts/prepare_f4_reference_source.py` to reshape local CSV rows
     with CIF text/path fields into manifest-friendly reference JSONL.
@@ -97,11 +115,10 @@ decisions.
     reports ready true.
   - This only verifies the local reference-pool plumbing. It must not be used as
     production F4 leakage evidence.
-  - Follow-up broad local scan under `/data/home/yihaoxu` did not find a
-    production-scale Alex-20s, CrystalFormer training-set, Materials Project,
-    ICSD, or GNoME reference snapshot. Production `reference_pool_v1` still
-    requires the user to provide or stage a real local reference CSV/JSONL with
-    CIF text/path fields before manifest construction can proceed.
+  - The earlier broad local scan under `/data/home/yihaoxu` did not find
+    production-scale MP, ICSD, or GNoME reference snapshots. That result is now
+    superseded for Alex-20 by the downloaded Hugging Face snapshot above, but
+    still applies to MP/ICSD/GNoME.
 
 ## SLURM GPU Scheduling Policy
 

@@ -71,6 +71,47 @@ Mini smoke reference pool:
   reference snapshot. Production `reference_pool_v1` remains blocked until a
   real local reference source is staged.
 
+## 2026-05-14: Download Alex-20 F4 Reference Snapshot
+
+- Downloaded Hugging Face dataset `zdcao/alex-20` to the gitignored local
+  directory `external/datasets/reference_pool_v1/raw/alex20_hf/` using:
+  `hf download zdcao/alex-20 --repo-type dataset --local-dir external/datasets/reference_pool_v1/raw/alex20_hf --max-workers 4`
+- Downloaded raw files:
+  - `alex20/train.csv`: 3,242,832,648 bytes, 1,071,694 rows,
+    sha256 `87a3de8bc8bbe245141e2c1727321c37c7fec001446d35b29c4521a3a8050641`
+  - `alex20/val.csv`: 406,115,502 bytes, 133,962 rows,
+    sha256 `026bc9a48e068ade16d6c68fee1e69111c66e96f441130a0782702ac2527273f`
+  - `alex20/test.csv`: 405,090,084 bytes, 133,962 rows,
+    sha256 `32390891666c66947cc41ef07fd75f3b3e5102e2f1ab6791f5ae43b05f032b39`
+  - `convex_hull_pbe_2023.12.29.json.bz2`: 82,996,526 bytes.
+- Updated `.gitignore` to exclude `external/datasets/`; these data files are
+  intentionally local artifacts, not repository content.
+- Extended `scripts/prepare_f4_reference_source.py` so large CSVs are streamed,
+  Alex-20-style inline `structure` columns are accepted, and `--omit-raw-row`
+  avoids duplicating huge structure text in metadata.
+- Extended `scripts/build_f4_reference_pool_manifest.py` so manifest building
+  streams JSONL instead of loading the complete reference pool into memory.
+- Prepared Alex-20 reference JSONL sources under
+  `outputs/f4_novelty_audit/reference_pool_v1/references/`:
+  - `alex20_train_snapshot.structures.jsonl`: 1,071,694 rows,
+    sha256 `a7cbb7308fab54dd910546355fd993ee0e91e99c593f88f85f4990ce81f10131`
+  - `alex20_val_snapshot.structures.jsonl`: 133,962 rows,
+    sha256 `7997dec0c896f1f0c5167ebf5544f52a0604fb679bb684bdea7f76c9ffe22026`
+  - `alex20_test_snapshot.structures.jsonl`: 133,962 rows,
+    sha256 `c39c7514fc25ed55709a070430d748f51c559419694ad52aec1a7efac6f2bc8d`
+- Built `outputs/f4_novelty_audit/reference_pool_v1/reference_pool_manifest.json`
+  with 3 sources, 1,339,618 total references, 0 duplicate reference ids, and 0
+  missing reference ids.
+- Re-ran readiness:
+  `python scripts/check_f4_novelty_audit_ready.py --plan-json outputs/f4_novelty_audit/reference_pool_v1/f4_audit_plan.json --output-json outputs/f4_novelty_audit/reference_pool_v1/readiness_summary.json`
+  and it reported `ready: true`.
+- Local provenance for the ignored data is at
+  `external/datasets/reference_pool_v1/provenance/alex20_hf_download.json`.
+- Caveat: `reference_pool_v1` now covers Alex-20, including train/val/test
+  splits. Materials Project, GNoME, and ICSD are still not staged, so this is a
+  strong training/known-Alex-20 leakage audit base, not yet an exhaustive
+  all-known-materials reference library.
+
 ## 2026-05-12: Guidance Consolidation And F1-F5 Alignment
 
 - Removed `docs/guidance/00_reading_order.md`.

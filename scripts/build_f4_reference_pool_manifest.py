@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import platform
 import socket
 import sys
@@ -17,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from fiir_crystal.io import read_jsonl, write_json
+from fiir_crystal.io import JsonlFormatError, write_json
 
 
 MANIFEST_SCHEMA_VERSION = "f4-reference-pool-manifest-v1"
@@ -56,11 +57,14 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     for name, path in sources:
         if not path.exists():
             raise SystemExit(f"reference source does not exist: {path}")
-        rows = read_jsonl(path)
-        source_ids, missing_ids = _reference_ids(rows, args.reference_id_field)
+        try:
+            stats = _reference_file_stats(path, args.reference_id_field)
+        except JsonlFormatError as exc:
+            raise SystemExit(str(exc)) from exc
+        source_ids = stats["reference_ids"]
+        missing_ids = stats["missing_reference_id_count"]
         if missing_ids and not args.allow_missing_reference_ids:
             raise SystemExit(f"reference source has rows without {args.reference_id_field}: {name}")
-        source_duplicate_ids = sorted(_duplicates(source_ids))
         all_reference_ids.extend(source_ids)
         missing_reference_id_count += missing_ids
         source_rows.append(
@@ -68,12 +72,12 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                 "name": name,
                 "path": str(path),
                 "format": args.format,
-                "reference_count": len(rows),
+                "reference_count": stats["reference_count"],
                 "sha256": _sha256(path),
                 "reference_id_field": args.reference_id_field,
                 "missing_reference_id_count": missing_ids,
-                "duplicate_reference_id_count": len(source_duplicate_ids),
-                "duplicate_reference_ids": source_duplicate_ids[:50],
+                "duplicate_reference_id_count": len(stats["duplicate_reference_ids"]),
+                "duplicate_reference_ids": stats["duplicate_reference_ids"][:50],
             }
         )
 
@@ -137,16 +141,34 @@ def _parse_reference_source(item: str) -> tuple[str, Path]:
     return name, Path(raw_path)
 
 
-def _reference_ids(rows: list[dict[str, Any]], field_name: str) -> tuple[list[str], int]:
+def _reference_file_stats(path: Path, field_name: str) -> dict[str, Any]:
     ids: list[str] = []
     missing_count = 0
-    for row in rows:
-        value = row.get(field_name)
-        if value in (None, ""):
-            missing_count += 1
-            continue
-        ids.append(str(value))
-    return ids, missing_count
+    reference_count = 0
+    with path.open("r", encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                row = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise JsonlFormatError(f"{path}:{line_no}: invalid JSON: {exc.msg}") from exc
+            if not isinstance(row, dict):
+                raise JsonlFormatError(f"{path}:{line_no}: JSONL row must be an object")
+            reference_count += 1
+            value = row.get(field_name)
+            if value in (None, ""):
+                missing_count += 1
+                continue
+            ids.append(str(value))
+    duplicate_reference_ids = sorted(_duplicates(ids))
+    return {
+        "reference_count": reference_count,
+        "reference_ids": ids,
+        "missing_reference_id_count": missing_count,
+        "duplicate_reference_ids": duplicate_reference_ids,
+    }
 
 
 def _render_report(manifest: dict[str, Any]) -> str:
