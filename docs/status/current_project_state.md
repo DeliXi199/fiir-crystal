@@ -97,6 +97,11 @@ decisions.
     reports ready true.
   - This only verifies the local reference-pool plumbing. It must not be used as
     production F4 leakage evidence.
+  - Follow-up broad local scan under `/data/home/yihaoxu` did not find a
+    production-scale Alex-20s, CrystalFormer training-set, Materials Project,
+    ICSD, or GNoME reference snapshot. Production `reference_pool_v1` still
+    requires the user to provide or stage a real local reference CSV/JSONL with
+    CIF text/path fields before manifest construction can proceed.
 
 ## SLURM GPU Scheduling Policy
 

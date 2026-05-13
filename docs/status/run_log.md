@@ -65,6 +65,11 @@ Mini smoke reference pool:
 - Caveat: this smoke pool validates local plumbing only. It is not production F4
   evidence and must not replace the missing full training/known-material
   reference snapshot.
+- Follow-up broad local scan under `/data/home/yihaoxu` searched for Alex,
+  train/training, Materials Project/MP, ICSD, GNoME, reference CSV/JSONL, and
+  common dataset cache files. It did not find a production-scale local
+  reference snapshot. Production `reference_pool_v1` remains blocked until a
+  real local reference source is staged.
 
 ## 2026-05-12: Guidance Consolidation And F1-F5 Alignment
 
