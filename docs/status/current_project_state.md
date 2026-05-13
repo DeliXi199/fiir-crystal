@@ -1,6 +1,6 @@
 # Current Project State
 
-Last updated: 2026-05-13, Asia/Shanghai.
+Last updated: 2026-05-14, Asia/Shanghai.
 
 This file is the compact project memory for future Codex sessions. Read it
 after `AGENTS.md` and before making roadmap, experiment, or implementation
@@ -31,10 +31,40 @@ decisions.
   - `docs/guidance/04_paper3_discovery_pipeline.md`
 - Failure schema now includes optional F4 novelty leakage and F5
   synthesizability fields, while FSAL/DPO pair mining remains focused on F1-F3.
+- F4 is now scoped as a fixed-reference novelty/leakage audit boundary, not a
+  dynamic intra-batch diversity score and not a DPO training target. The core
+  package plans local audit tasks and imports externally computed F4 evidence,
+  but still does not run StructureMatcher, pymatgen, database queries, downloads,
+  or external APIs.
 - End-of-task operating rule: after each durable task, inspect whether the
   scoped code/config/status changes should be committed and pushed to GitHub.
   Push only when the worktree can be scoped cleanly without large generated
   artifacts or unrelated user changes; otherwise record why upload is deferred.
+
+## F4 Novelty/Leakage Boundary
+
+- Implemented local-only F4 audit planning, reference-pool manifest, readiness
+  checking, and result import:
+  - `scripts/plan_f4_novelty_audit.py`
+  - `scripts/build_f4_reference_pool_manifest.py`
+  - `scripts/check_f4_novelty_audit_ready.py`
+  - `scripts/import_f4_novelty_audit.py`
+  - `fiir_crystal/validation/novelty.py`
+- Spec and runbook:
+  - `docs/specs/f4_novelty_leakage_audit.md`
+  - `docs/setup/f4_reference_pool_workspace.md`
+- Intended first real use:
+  1. Create a fixed `reference_pool_v1` from local CrystalFormer training-set
+     and known-material snapshots.
+  2. Run `plan_f4_novelty_audit.py` against the current candidate index.
+  3. Run the actual StructureMatcher/fingerprint comparison outside the core
+     package and write `f4_results.jsonl`.
+  4. Import results with `import_f4_novelty_audit.py`, then use
+     `f4_novelty_leakage` for benchmark leakage-rate reporting and DPO pair
+     filtering.
+- Verification passed:
+  `pytest -q tests/test_f4_novelty_import.py tests/test_f4_novelty_audit_plan.py tests/test_f4_reference_pool_manifest.py`
+  and `pytest -q`.
 
 ## SLURM GPU Scheduling Policy
 

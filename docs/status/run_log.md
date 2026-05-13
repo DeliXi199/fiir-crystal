@@ -4,6 +4,29 @@ This file records durable, high-signal workflow results for future agents. Keep
 entries concise and point to generated artifacts instead of duplicating large
 outputs.
 
+## 2026-05-14: F4 Novelty/Leakage Audit Boundary
+
+- Added a local-only F4 novelty/leakage audit boundary. The FIIR core now plans
+  audit tasks, records fixed reference-pool provenance, checks readiness, and
+  imports externally computed F4 rows without running StructureMatcher,
+  pymatgen, database queries, downloads, or external APIs.
+- Added:
+  - `fiir_crystal/validation/novelty.py`
+  - `scripts/plan_f4_novelty_audit.py`
+  - `scripts/build_f4_reference_pool_manifest.py`
+  - `scripts/check_f4_novelty_audit_ready.py`
+  - `scripts/import_f4_novelty_audit.py`
+  - `docs/specs/f4_novelty_leakage_audit.md`
+  - `docs/setup/f4_reference_pool_workspace.md`
+  - focused F4 tests.
+- F4 decision: `f4_novelty_leakage` is measured against a frozen external
+  reference pool such as training-set and known-material snapshots. Internal
+  generated-structure duplication remains a separate diversity/mode-collapse
+  QA metric, not the F4 main label.
+- Verification:
+  `pytest -q tests/test_f4_novelty_import.py tests/test_f4_novelty_audit_plan.py tests/test_f4_reference_pool_manifest.py`
+  and `pytest -q` passed.
+
 ## 2026-05-12: Guidance Consolidation And F1-F5 Alignment
 
 - Removed `docs/guidance/00_reading_order.md`.
