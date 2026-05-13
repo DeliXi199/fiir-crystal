@@ -80,6 +80,23 @@ decisions.
     GNoME structure snapshot suitable for production F4 reference use.
   - Do not build production `reference_pool_v1` from `mini.csv`; it is only a
     tiny example dataset and would understate leakage risk.
+- F4 smoke reference state:
+  - Added `scripts/prepare_f4_reference_source.py` to reshape local CSV rows
+    with CIF text/path fields into manifest-friendly reference JSONL.
+  - Created a non-production smoke reference pool from
+    `external/CrystalFormer/data/mini.csv`:
+    `outputs/f4_novelty_audit/reference_pool_mini_smoke/`
+  - Smoke task plan: 1024 candidate tasks, 16 shards x 64 rows.
+  - Smoke reference source:
+    `outputs/f4_novelty_audit/reference_pool_mini_smoke/references/crystalformer_mini_example.structures.jsonl`
+    with 29 rows.
+  - Smoke manifest:
+    `outputs/f4_novelty_audit/reference_pool_mini_smoke/reference_pool_manifest.json`
+  - Smoke readiness:
+    `outputs/f4_novelty_audit/reference_pool_mini_smoke/readiness_summary.json`
+    reports ready true.
+  - This only verifies the local reference-pool plumbing. It must not be used as
+    production F4 leakage evidence.
 
 ## SLURM GPU Scheduling Policy
 

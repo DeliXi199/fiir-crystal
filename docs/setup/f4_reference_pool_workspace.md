@@ -94,6 +94,20 @@ A real manifest must use this shape:
 All paths should point to local files. The manifest is provenance, not a
 download recipe.
 
+Prepare a local CSV with CIF text/path fields as a reference source JSONL:
+
+```bash
+python scripts/prepare_f4_reference_source.py \
+  --input-csv external/CrystalFormer/data/mini.csv \
+  --source-name crystalformer_mini_example \
+  --output-jsonl outputs/f4_novelty_audit/reference_pool_mini_smoke/references/crystalformer_mini_example.structures.jsonl
+```
+
+This helper is useful for smoke tests and for reshaping real local snapshots
+after they have been obtained. Do not treat `external/CrystalFormer/data/mini.csv`
+as production F4 evidence; it is a tiny example file and is not the Alex-20s
+training snapshot.
+
 Build a real manifest from local reference JSONL files:
 
 ```bash

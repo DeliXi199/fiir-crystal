@@ -46,6 +46,26 @@ Follow-up execution:
   MP, ICSD, or GNoME reference snapshot. Do not use `mini.csv` as production
   F4 reference evidence.
 
+Mini smoke reference pool:
+
+- Added `scripts/prepare_f4_reference_source.py` to convert an existing local
+  CSV with CIF text/path fields into reference JSONL for manifest construction.
+- Prepared a non-production smoke source from `external/CrystalFormer/data/mini.csv`:
+  `outputs/f4_novelty_audit/reference_pool_mini_smoke/references/crystalformer_mini_example.structures.jsonl`
+  with 29 rows.
+- Built smoke manifest:
+  `outputs/f4_novelty_audit/reference_pool_mini_smoke/reference_pool_manifest.json`
+  with `reference_pool_id=reference_pool_mini_smoke`.
+- Planned smoke F4 tasks:
+  `outputs/f4_novelty_audit/reference_pool_mini_smoke/f4_audit_plan.json`
+  with 1024 tasks and 16 shards.
+- Readiness check:
+  `python scripts/check_f4_novelty_audit_ready.py --plan-json outputs/f4_novelty_audit/reference_pool_mini_smoke/f4_audit_plan.json --output-json outputs/f4_novelty_audit/reference_pool_mini_smoke/readiness_summary.json`
+  reported ready true.
+- Caveat: this smoke pool validates local plumbing only. It is not production F4
+  evidence and must not replace the missing full training/known-material
+  reference snapshot.
+
 ## 2026-05-12: Guidance Consolidation And F1-F5 Alignment
 
 - Removed `docs/guidance/00_reading_order.md`.
