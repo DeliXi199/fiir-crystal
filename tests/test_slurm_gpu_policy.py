@@ -182,6 +182,7 @@ def test_sbatch_plan_requests_all_currently_free_resources() -> None:
     assert request["node"] == "gpuh2002"
     assert request["gpus"] == 6
     assert request["cpus"] == 128
+    assert request["memory_mb"] == 1_500_000
     assert request["gres"] == "gpu:6"
     assert request["exclusive"] is False
     assert request["uses_all_currently_free_gpus"] is True
@@ -190,6 +191,8 @@ def test_sbatch_plan_requests_all_currently_free_resources() -> None:
     assert "gpuh2002" in plan["sbatch_args"]
     assert "--cpus-per-task" in plan["sbatch_args"]
     assert "128" in plan["sbatch_args"]
+    assert "--mem" in plan["sbatch_args"]
+    assert "1500000M" in plan["sbatch_args"]
     assert "FIIR_TOTAL_GPUS=6" in " ".join(plan["sbatch_args"])
 
 
@@ -208,6 +211,30 @@ def test_partition_filter_can_choose_idle_4090_node() -> None:
     assert plan["request"]["exclusive"] is True
     assert "--exclusive" in plan["sbatch_args"]
     assert "gpu:rtx4090:8" in plan["sbatch_args"]
+
+
+def test_pinned_memory_request_is_capped_at_real_memory() -> None:
+    text = """
+NodeName=gpu40903 Arch=x86_64 CoresPerSocket=32
+   CPUAlloc=0 CPUEfctv=128 CPUTot=128 CPULoad=0.86
+   Gres=gpu:rtx4090:8
+   State=IDLE ThreadsPerCore=2
+   Partitions=gpu4090_128
+   RealMemory=1000000 AllocMem=0 FreeMem=1018262
+   CfgTRES=cpu=128,mem=1000000M,billing=128,gres/gpu=8
+   AllocTRES=
+"""
+    selection = select_best_gpu_node(
+        parse_scontrol_nodes(text),
+        GpuSchedulingConfig(accelerator="cuda", allowed_partitions=("gpu4090_128",)),
+    )
+    assert selection is not None
+
+    plan = build_sbatch_plan(selection)
+
+    assert plan["request"]["memory_mb"] == 1_000_000
+    assert "--mem" in plan["sbatch_args"]
+    assert "1000000M" in plan["sbatch_args"]
 
 
 def test_test_gpu_partition_has_time_guard() -> None:
@@ -341,9 +368,12 @@ NodeName=gpuh2002 Arch=x86_64 CoresPerSocket=48
     assert plan["sbatch"]["request"]["partition"] == "h200,h20,h20llm,gpu4090_8"
     assert plan["sbatch"]["request"]["gpus"] == 8
     assert plan["sbatch"]["request"]["cpus"] == 32
+    assert plan["sbatch"]["request"]["memory_mb"] == 500_000
     assert "--nodelist" not in plan["sbatch"]["sbatch_args"]
     assert "--partition" in plan["sbatch"]["sbatch_args"]
     assert "h200,h20,h20llm,gpu4090_8" in plan["sbatch"]["sbatch_args"]
+    assert "--mem" in plan["sbatch"]["sbatch_args"]
+    assert "500000M" in plan["sbatch"]["sbatch_args"]
     assert "FIIR_GPU_QUEUE_MODE=flexible" in " ".join(plan["sbatch"]["sbatch_args"])
 
 
@@ -383,10 +413,12 @@ NodeName=gpuh202 Arch=x86_64 CoresPerSocket=48
     assert plan["ready"] is True
     assert plan["config"]["min_cpus"] == 192
     assert plan["config"]["queue_min_cpus"] == 32
+    assert plan["config"]["queue_memory_mb"] == 500_000
     assert plan["config"]["effective_queue_mode"] == "flexible"
     assert plan["selection"]["candidate_partitions"] == ["h20", "h20llm", "gpu4090_8"]
     assert plan["sbatch"]["request"]["gpus"] == 8
     assert plan["sbatch"]["request"]["cpus"] == 32
+    assert plan["sbatch"]["request"]["memory_mb"] == 500_000
     assert plan["sbatch"]["request"]["partition"] == "h20,h20llm,gpu4090_8"
 
 

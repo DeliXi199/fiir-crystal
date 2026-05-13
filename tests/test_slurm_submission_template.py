@@ -82,8 +82,10 @@ def test_crystalformer_gpu_submitter_uses_unified_gpu_policy() -> None:
     assert "--gpu-queue-mode" in text
     assert "FIIR_GPU_QUEUE_MIN_GPUS" in text
     assert "FIIR_GPU_QUEUE_MIN_CPUS" in text
+    assert "FIIR_GPU_QUEUE_MEMORY_MB" in text
     assert "--queue-min-gpus" in text
     assert "--queue-min-cpus" in text
+    assert "--queue-memory-mb" in text
     assert "FIIR_MACE_RELAX" in text
     assert "fp64" in text
     assert "--precision-profile" in text
@@ -167,6 +169,8 @@ def test_slurm_readme_documents_auto_gpu_partition_selection() -> None:
     assert "flexible multi-partition queueing" in text
     assert "does not use `--nodelist`" in text
     assert "8 GPUs and 32 CPUs" in text
+    assert "smallest total memory size" in text
+    assert "500000M" in text
     assert "Omit" in text
     assert "resource-aware selection across all CUDA-compatible GPU" in text
 

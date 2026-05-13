@@ -9,7 +9,7 @@ sizing, not as default ranking signals.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import re
 import shlex
 import subprocess
@@ -55,6 +55,7 @@ DEFAULT_GPU_PRECISION_PROFILE = "tf32"
 DEFAULT_GPU_WEIGHTS: dict[str, int] = dict(TF32_GPU_WEIGHTS)
 DEFAULT_FLEXIBLE_QUEUE_GPUS = 8
 DEFAULT_FLEXIBLE_QUEUE_CPUS = 32
+DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB = 0
 
 CUDA_PARTITION_HINTS = ("h200", "h20", "h800", "gpu4090", "test")
 NON_CUDA_PARTITION_HINTS = ("amd", "intel")
@@ -142,6 +143,7 @@ class GpuSchedulingConfig:
     exclusive_when_full_node: bool = True
     queue_min_gpus: int = DEFAULT_FLEXIBLE_QUEUE_GPUS
     queue_min_cpus: int = DEFAULT_FLEXIBLE_QUEUE_CPUS
+    queue_memory_mb: int = DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB
     gpu_weights: Mapping[str, int] | None = None
     time_limit_minutes: int | None = None
     test_partition: str = DEFAULT_TEST_PARTITION
@@ -163,6 +165,8 @@ class GpuSchedulingConfig:
             raise ValueError("GPU queue_min_gpus must be at least 1")
         if self.queue_min_cpus < 1:
             raise ValueError("GPU queue_min_cpus must be at least 1")
+        if self.queue_memory_mb < 0:
+            raise ValueError("GPU queue_memory_mb must be non-negative")
         if self.gpu_weights is None:
             object.__setattr__(self, "gpu_weights", gpu_weights_for_profile(profile))
         else:
@@ -446,6 +450,11 @@ def build_sbatch_plan(
         args.extend(["--account", account])
     if time_limit:
         args.extend(["--time", time_limit])
+    memory_mb = node.free_memory_mb
+    if node.total_memory_mb > 0:
+        memory_mb = min(memory_mb, node.total_memory_mb) if memory_mb > 0 else node.total_memory_mb
+    if memory_mb > 0:
+        args.extend(["--mem", f"{memory_mb}M"])
     exclusive = node.is_fully_idle and exclusive_when_full_node
     if exclusive:
         args.append("--exclusive")
@@ -482,6 +491,7 @@ def build_sbatch_plan(
             "partition": selection.partition,
             "gpus": gpu_count,
             "cpus": cpu_count,
+            "memory_mb": memory_mb,
             "gres": node.gres_request(gpu_count),
             "layout": layout,
             "cpus_per_task": cpus_per_task,
@@ -528,6 +538,8 @@ def build_flexible_queue_sbatch_plan(
         args.extend(["--account", account])
     if time_limit:
         args.extend(["--time", time_limit])
+    if config.queue_memory_mb > 0:
+        args.extend(["--mem", f"{config.queue_memory_mb}M"])
     if layout == "one-task-per-gpu":
         cpus_per_task = max(1, cpu_count // gpu_count)
         args.extend(["--ntasks-per-node", str(gpu_count), "--cpus-per-task", str(cpus_per_task)])
@@ -563,6 +575,7 @@ def build_flexible_queue_sbatch_plan(
             "candidate_partitions": list(partitions),
             "gpus": gpu_count,
             "cpus": cpu_count,
+            "memory_mb": config.queue_memory_mb,
             "gres": f"gpu:{gpu_count}",
             "layout": layout,
             "cpus_per_task": cpus_per_task,
@@ -593,16 +606,17 @@ def plan_gpu_job(
                 "selection": None,
                 "sbatch": None,
             }
+        queue_config = resolve_flexible_queue_config(nodes, config)
         sbatch = build_flexible_queue_sbatch_plan(
             partitions,
-            config,
-            layout=config.layout,
+            queue_config,
+            layout=queue_config.layout,
             **sbatch_kwargs,
         )
         return {
             "ready": True,
             "reason": "flexible_gpu_queue_across_candidate_partitions",
-            "config": config_to_dict(config, effective_queue_mode_override="flexible"),
+            "config": config_to_dict(queue_config, effective_queue_mode_override="flexible"),
             "selection": {
                 "selected_node": None,
                 "selected_partition": ",".join(partitions),
@@ -633,16 +647,17 @@ def plan_gpu_job(
     if config.queue_mode == "auto":
         partitions = flexible_queue_partitions(nodes, config)
         if partitions:
+            queue_config = resolve_flexible_queue_config(nodes, config)
             sbatch = build_flexible_queue_sbatch_plan(
                 partitions,
-                config,
-                layout=config.layout,
+                queue_config,
+                layout=queue_config.layout,
                 **sbatch_kwargs,
             )
             return {
                 "ready": True,
                 "reason": "no_free_gpu_resources_flexible_queue_across_candidate_partitions",
-                "config": config_to_dict(config, effective_queue_mode_override="flexible"),
+                "config": config_to_dict(queue_config, effective_queue_mode_override="flexible"),
                 "selection": {
                     "selected_node": None,
                     "selected_partition": ",".join(partitions),
@@ -688,6 +703,7 @@ def config_to_dict(
         "exclusive_when_full_node": config.exclusive_when_full_node,
         "queue_min_gpus": config.queue_min_gpus,
         "queue_min_cpus": config.queue_min_cpus,
+        "queue_memory_mb": config.queue_memory_mb,
         "gpu_weights": effective_gpu_weights(config),
         "time_limit_minutes": config.time_limit_minutes,
         "test_partition": config.test_partition,
@@ -701,6 +717,30 @@ def effective_queue_mode(config: GpuSchedulingConfig) -> str:
     if config.queue_mode != "auto":
         return config.queue_mode
     return "pinned_then_flexible_on_no_free_gpu"
+
+
+def resolve_flexible_queue_config(
+    nodes: Sequence[GpuNode],
+    config: GpuSchedulingConfig,
+) -> GpuSchedulingConfig:
+    if config.queue_memory_mb > 0:
+        return config
+    memory_mb = flexible_queue_memory_mb(nodes, config)
+    if memory_mb <= 0:
+        return config
+    return replace(config, queue_memory_mb=memory_mb)
+
+
+def flexible_queue_memory_mb(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -> int:
+    partitions = set(flexible_queue_partitions(nodes, config))
+    if not partitions:
+        return 0
+    memories = [
+        node.total_memory_mb
+        for node in queueable_gpu_nodes(nodes, config)
+        if node.total_memory_mb > 0 and partitions.intersection(node.partitions)
+    ]
+    return min(memories) if memories else 0
 
 
 def flexible_queue_partitions(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -> tuple[str, ...]:
@@ -759,7 +799,8 @@ def node_is_queueable(node: GpuNode, config: GpuSchedulingConfig) -> bool:
         return False
     if node.total_cpus < config.queue_min_cpus:
         return False
-    if node.total_memory_mb < config.min_memory_mb:
+    required_memory_mb = max(config.min_memory_mb, config.queue_memory_mb)
+    if node.total_memory_mb < required_memory_mb:
         return False
     if config.allowed_partitions and not set(node.partitions).intersection(config.allowed_partitions):
         return False

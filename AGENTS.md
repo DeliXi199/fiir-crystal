@@ -56,11 +56,12 @@ Execution policy
   currently free GPUs and CPU cores on that selected node. Queue flexibly
   across eligible GPU partitions/nodes only when no eligible GPU node has
   enough free resources to start now; in that queued fallback, use the broad
-  compatibility request shape of 8 GPUs and 32 CPU cores unless the workflow
-  has a documented stricter requirement. This keeps the job eligible for more
-  future nodes while still requesting actual GPUs. Keep short bounded GPU
-  sanity jobs eligible for `test` only when the explicit time limit is 30
-  minutes or less.
+  compatibility request shape of 8 GPUs, 32 CPU cores, and an explicit
+  right-sized memory request rather than letting SLURM default to full-node
+  memory unless the workflow has a documented stricter requirement. This keeps
+  the job eligible for more future nodes while still requesting actual GPUs.
+  Keep short bounded GPU sanity jobs eligible for `test` only when the explicit
+  time limit is 30 minutes or less.
 - GPU jobs must request actual GPUs, not merely land on a GPU node and use CPU
   cores. For flexible larger jobs, set the requested GPU count explicitly
   through the existing wrapper/planner knobs such as `FIIR_GPU_MIN_GPUS` or
@@ -83,8 +84,10 @@ Execution policy
   submitted jobs, including smoke, debug, validation, generation, training, and
   evaluation jobs. When no eligible GPU node can start the job now and the job
   must wait in a flexible queue, use the standard 8 GPU + 32 CPU queued request
-  shape so more future GPU nodes can satisfy the job. Configure task-level
-  concurrency so the allocated resources in either case are actually used.
+  shape plus an explicit memory request resolved from the smallest total memory
+  size among eligible queueable nodes, unless the workflow documents another
+  requirement. Configure task-level concurrency so the allocated resources in
+  either case are actually used.
 
 External resources and dependencies
 -----------------------------------

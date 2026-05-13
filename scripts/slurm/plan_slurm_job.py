@@ -19,6 +19,7 @@ from fiir_crystal.slurm_scheduling import (
     CPU_PARTITION_ORDER_DEFAULT,
     DEFAULT_FLEXIBLE_QUEUE_CPUS,
     DEFAULT_FLEXIBLE_QUEUE_GPUS,
+    DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB,
     GPU_WEIGHT_PROFILES,
     CpuSchedulingConfig,
     GpuSchedulingConfig,
@@ -68,6 +69,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     gpu.add_argument("--min-memory-mb", type=int, default=0)
     gpu.add_argument("--queue-min-gpus", type=int, default=DEFAULT_FLEXIBLE_QUEUE_GPUS)
     gpu.add_argument("--queue-min-cpus", type=int, default=DEFAULT_FLEXIBLE_QUEUE_CPUS)
+    gpu.add_argument("--queue-memory-mb", type=int, default=DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB)
     gpu.add_argument("--layout", choices=("single-task", "one-task-per-gpu"), default="single-task")
     gpu.add_argument(
         "--precision-profile",
@@ -164,6 +166,8 @@ def _build_plan(args: argparse.Namespace) -> dict[str, Any]:
         raise SystemExit("--queue-min-gpus must be at least 1")
     if args.queue_min_cpus < 1:
         raise SystemExit("--queue-min-cpus must be at least 1")
+    if args.queue_memory_mb < 0:
+        raise SystemExit("--queue-memory-mb must be non-negative")
     nodes = _load_gpu_nodes(args)
     config = GpuSchedulingConfig(
         accelerator=args.accelerator,
@@ -175,6 +179,7 @@ def _build_plan(args: argparse.Namespace) -> dict[str, Any]:
         layout=args.layout,
         queue_min_gpus=args.queue_min_gpus,
         queue_min_cpus=args.queue_min_cpus,
+        queue_memory_mb=args.queue_memory_mb,
         gpu_weights=parse_gpu_weights(args.gpu_weight, precision_profile=args.precision_profile),
         time_limit_minutes=parse_slurm_time_limit_minutes(args.time),
         queue_mode=args.gpu_queue_mode,
@@ -236,6 +241,8 @@ def _print_summary(plan: dict[str, Any], output_json: str | None) -> None:
             )
         print(f"  requested_gpus: {request['gpus']}")
         print(f"  requested_cpus: {request['cpus']}")
+        if request.get("memory_mb"):
+            print(f"  requested_memory_mb: {request['memory_mb']}")
         print(f"  requested_gres: {request['gres']}")
     print(f"  exclusive: {request['exclusive']}")
     if output_json:

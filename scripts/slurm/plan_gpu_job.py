@@ -22,6 +22,7 @@ from fiir_crystal.io import write_json
 from fiir_crystal.slurm_scheduling import (
     DEFAULT_FLEXIBLE_QUEUE_CPUS,
     DEFAULT_FLEXIBLE_QUEUE_GPUS,
+    DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB,
     GPU_WEIGHT_PROFILES,
     GpuSchedulingConfig,
     discover_gpu_nodes,
@@ -49,6 +50,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--min-memory-mb", type=int, default=0)
     parser.add_argument("--queue-min-gpus", type=int, default=DEFAULT_FLEXIBLE_QUEUE_GPUS)
     parser.add_argument("--queue-min-cpus", type=int, default=DEFAULT_FLEXIBLE_QUEUE_CPUS)
+    parser.add_argument("--queue-memory-mb", type=int, default=DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB)
     parser.add_argument(
         "--layout",
         choices=("single-task", "one-task-per-gpu"),
@@ -94,6 +96,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         raise SystemExit("--queue-min-gpus must be at least 1")
     if args.queue_min_cpus < 1:
         raise SystemExit("--queue-min-cpus must be at least 1")
+    if args.queue_memory_mb < 0:
+        raise SystemExit("--queue-memory-mb must be non-negative")
     if args.run_sbatch and not args.submit_script:
         raise SystemExit("--run-sbatch requires --submit-script")
 
@@ -108,6 +112,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         layout=args.layout,
         queue_min_gpus=args.queue_min_gpus,
         queue_min_cpus=args.queue_min_cpus,
+        queue_memory_mb=args.queue_memory_mb,
         gpu_weights=parse_gpu_weights(args.gpu_weight, precision_profile=args.precision_profile),
         time_limit_minutes=parse_slurm_time_limit_minutes(args.time),
         queue_mode=args.gpu_queue_mode,
@@ -171,6 +176,8 @@ def _print_summary(plan: dict[str, Any], output_json: str | None) -> None:
         )
     print(f"  requested_gpus: {request['gpus']}")
     print(f"  requested_cpus: {request['cpus']}")
+    if request.get("memory_mb"):
+        print(f"  requested_memory_mb: {request['memory_mb']}")
     print(f"  requested_gres: {request['gres']}")
     print(f"  layout: {request['layout']}")
     print(f"  exclusive: {request['exclusive']}")
