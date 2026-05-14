@@ -156,6 +156,29 @@ def test_qa_allows_documented_zero_pair_cases(tmp_path) -> None:
     assert result["summary"]["warning_count"] >= 1
 
 
+def test_qa_scopes_candidate_ids_by_input_root(tmp_path) -> None:
+    before = tmp_path / "before"
+    after = tmp_path / "after"
+    rows = [_audit_row("c1", "BaTiO3"), _audit_row("c2", "BaTiO3")]
+    _write_audit(before, "BaTiO3", rows)
+    _write_preferences(before, "BaTiO3", [_pair("c1", "c2", "BaTiO3")])
+    _write_audit(after, "BaTiO3", rows)
+    _write_preferences(after, "BaTiO3", [_pair("c1", "c2", "BaTiO3")])
+
+    result = main(
+        [
+            "--input-roots",
+            str(before),
+            str(after),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    assert "duplicate_candidate_id" not in _critical_checks(result)
+    assert result["summary"]["ready"] is True
+
+
 def test_qa_reports_partial_roots_as_warning_or_strict_critical(tmp_path) -> None:
     root = tmp_path / "partial"
     root.mkdir()

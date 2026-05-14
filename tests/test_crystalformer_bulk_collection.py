@@ -90,6 +90,56 @@ def test_collect_crystalformer_bulk_results_summarizes_fake_completed_root(tmp_p
     assert (tmp_path / "collection" / "report.md").exists()
 
 
+def test_collect_scopes_candidate_and_pair_counts_by_root(tmp_path) -> None:
+    for root_name in ("before", "after"):
+        root = tmp_path / root_name
+        audit_dir = root / "smoke" / "crystalformer_audit" / "BaTiO3"
+        pref_dir = root / "smoke" / "dpo_preferences" / "BaTiO3"
+        audit_dir.mkdir(parents=True)
+        pref_dir.mkdir(parents=True)
+        write_json(
+            root / "bulk_summary.json",
+            {
+                "items": [
+                    {
+                        "formula": "BaTiO3",
+                        "status": "succeeded",
+                        "smoke_summary": {
+                            "candidate_count": 2,
+                            "dpo_eligible_count": 2,
+                            "preference_pair_count": 1,
+                        },
+                    }
+                ]
+            },
+        )
+        write_jsonl(audit_dir / "candidates.jsonl", [_candidate("c1"), _candidate("c2")])
+        write_jsonl(audit_dir / "audit_candidates.jsonl", [_candidate("c1"), _candidate("c2")])
+        write_json(audit_dir / "audit_summary.json", {"total_candidates": 2, "dpo_eligible_count": 2})
+        write_jsonl(audit_dir / "failure_vectors.jsonl", [{"candidate_id": "c1"}, {"candidate_id": "c2"}])
+        (audit_dir / "report.md").write_text("# audit\n", encoding="utf-8")
+        write_jsonl(pref_dir / "preference_pairs.jsonl", [_pair("c1", "c2")])
+        write_json(pref_dir / "preference_summary.json", {"pair_count": 1, "skip_reasons": {}})
+        (pref_dir / "report.md").write_text("# prefs\n", encoding="utf-8")
+
+    result = main(
+        [
+            "--output-roots",
+            str(tmp_path / "before"),
+            str(tmp_path / "after"),
+            "--output-dir",
+            str(tmp_path / "collection"),
+        ]
+    )
+
+    summary = result["summary"]
+    assert summary["formula_count"] == 1
+    assert summary["total_candidates"] == 4
+    assert summary["total_audit_candidates"] == 4
+    assert summary["total_dpo_eligible"] == 4
+    assert summary["total_preference_pairs"] == 2
+
+
 def test_collect_reports_partial_and_malformed_artifacts(tmp_path) -> None:
     root = tmp_path / "partial"
     audit_dir = root / "crystalformer_audit" / "BaTiO3"

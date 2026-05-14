@@ -151,7 +151,7 @@ def build_dpo_preferences(
 
     pairs: list[DPOPreferencePair] = []
     for group_key, rows in sorted(groups.items(), key=lambda item: str(item[0])):
-        rows = sorted(rows, key=lambda row: (float(row["fiir_score"]), str(row["candidate_id"])))
+        rows = sorted(rows, key=lambda row: (_sort_score(row), str(row["candidate_id"])))
         group_pair_start = len(pairs)
         for left_index, chosen in enumerate(rows):
             for rejected in rows[left_index + 1 :]:
@@ -336,7 +336,7 @@ def _summary(
             for rows in groups.values()
             if len(rows) < 2
             or not any(
-                abs(float(left["fiir_score"]) - float(right["fiir_score"])) >= cfg.min_preference_margin
+                _score_gap(left, right) >= cfg.min_preference_margin
                 for left, right in combinations(rows, 2)
             )
         ),
@@ -368,10 +368,28 @@ def _condition_key(row: dict[str, Any], cfg: PreferenceBuildConfig) -> tuple[Any
 
 
 def _score(row: dict[str, Any]) -> float | None:
-    value = row.get("fiir_score", row.get("ranking_score"))
-    if value is None:
+    value = row.get("fiir_score")
+    if value is not None:
+        return float(value)
+    ranking_score = row.get("ranking_score")
+    if ranking_score is None:
         return None
-    return float(value)
+    # `ranking_score` is a success-like score (`1 - fiir_score`), so convert
+    # it back to the lower-is-better failure score used for pair ordering.
+    return 1.0 - float(ranking_score)
+
+
+def _sort_score(row: dict[str, Any]) -> float:
+    score = _score(row)
+    return float("inf") if score is None else score
+
+
+def _score_gap(left: dict[str, Any], right: dict[str, Any]) -> float:
+    left_score = _score(left)
+    right_score = _score(right)
+    if left_score is None or right_score is None:
+        return 0.0
+    return abs(float(left_score) - float(right_score))
 
 
 def _sequence(row: dict[str, Any]) -> dict[str, Any]:

@@ -122,6 +122,22 @@ def test_build_dpo_preferences_records_no_comparable_margin() -> None:
     assert summary.skip_reasons["no_comparable_margin"] == 1
 
 
+def test_build_dpo_preferences_converts_ranking_score_to_failure_score() -> None:
+    good = _audit_row("good", 0.0)
+    bad = _audit_row("bad", 0.4)
+    del good["fiir_score"]
+    del bad["fiir_score"]
+
+    pairs, summary = build_dpo_preferences([good, bad], PreferenceBuildConfig(formula="BaTiO3"))
+
+    assert summary.pair_count == 1
+    pair = pairs[0].to_dict()
+    assert pair["chosen_candidate_id"] == "good"
+    assert pair["rejected_candidate_id"] == "bad"
+    assert pair["chosen_score"] == 0.0
+    assert pair["rejected_score"] == 0.4
+
+
 def test_pair_is_json_serializable() -> None:
     pairs, _ = build_dpo_preferences([_audit_row("good", 0.0), _audit_row("bad", 0.2)])
 

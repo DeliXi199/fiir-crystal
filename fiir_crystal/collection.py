@@ -543,7 +543,7 @@ def _apply_artifact_read(
             _record_artifact(state, read)
             candidate_id = _candidate_id(row)
             if candidate_id:
-                state.candidate_ids.add(candidate_id)
+                state.candidate_ids.add(_root_scoped_key(read, candidate_id))
     elif artifact == "audit_candidates.jsonl":
         for row in read.rows:
             formula = _formula_from_row(row) or path_formula
@@ -553,9 +553,10 @@ def _apply_artifact_read(
             _record_artifact(state, read)
             candidate_id = _candidate_id(row)
             if candidate_id:
-                state.audit_candidate_ids.add(candidate_id)
+                scoped_candidate_id = _root_scoped_key(read, candidate_id)
+                state.audit_candidate_ids.add(scoped_candidate_id)
                 if row.get("dpo_eligible") is True:
-                    state.dpo_eligible_ids.add(candidate_id)
+                    state.dpo_eligible_ids.add(scoped_candidate_id)
             for reason in row.get("dpo_ineligible_reasons", []) or []:
                 state.blocking_reasons[str(reason)] += 1
                 aggregate_reasons[str(reason)] += 1
@@ -575,7 +576,7 @@ def _apply_artifact_read(
                 continue
             state = _formula_state(formula_state, formula)
             _record_artifact(state, read)
-            state.preference_pair_keys.add(_preference_pair_key(row))
+            state.preference_pair_keys.add(_root_scoped_key(read, _preference_pair_key(row)))
             preference_type = row.get("preference_type")
             if preference_type:
                 aggregate_reasons[f"preference_type:{preference_type}"] += 1
@@ -650,6 +651,10 @@ def _root_summary(root: Path, reads: Sequence[ArtifactRead]) -> dict[str, Any]:
 def _record_artifact(state: FormulaCollection, read: ArtifactRead) -> None:
     state.roots.add(str(read.root))
     state.artifact_paths.add(str(read.path))
+
+
+def _root_scoped_key(read: ArtifactRead, key: str) -> str:
+    return f"{read.root}|{key}"
 
 
 def _formula_state(

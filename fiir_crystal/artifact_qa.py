@@ -291,6 +291,7 @@ def _build_candidate_index(
                     "formula": formula,
                     "generation": generation,
                     "spacegroup": _spacegroup(row),
+                    "root": str(read.root),
                     "path": str(read.path),
                     "artifact": read.artifact,
                     "row": row,
@@ -306,6 +307,7 @@ def _check_candidate_uniqueness(index: dict[str, list[dict[str, Any]]]) -> list[
         for entry in entries:
             formula = entry.get("formula")
             key = (
+                str(entry.get("root")),
                 formula,
                 _generation_label(entry.get("generation")),
                 candidate_id,
@@ -389,8 +391,9 @@ def _check_preference_pairs(
                 failures.append(_pair_failure(read, row, CRITICAL, "missing_chosen_candidate", "chosen candidate id not found in candidates/audit candidates"))
             if not rejected_entries:
                 failures.append(_pair_failure(read, row, CRITICAL, "missing_rejected_candidate", "rejected candidate id not found in candidates/audit candidates"))
-            chosen_entry = _best_candidate_entry(chosen_entries, formula)
-            rejected_entry = _best_candidate_entry(rejected_entries, formula)
+            root = str(read.root)
+            chosen_entry = _best_candidate_entry(chosen_entries, formula, root)
+            rejected_entry = _best_candidate_entry(rejected_entries, formula, root)
             failures.extend(_check_pair_condition(read, row, chosen_entry, rejected_entry))
             failures.extend(_check_pair_scores(read, row))
             failures.extend(_check_pair_sequences(read, row))
@@ -585,9 +588,31 @@ def _pair_failure(
     )
 
 
-def _best_candidate_entry(entries: Sequence[dict[str, Any]], formula: str | None) -> dict[str, Any] | None:
+def _best_candidate_entry(
+    entries: Sequence[dict[str, Any]],
+    formula: str | None,
+    root: str | None = None,
+) -> dict[str, Any] | None:
     if not entries:
         return None
+    for entry in entries:
+        if (
+            root
+            and entry.get("root") == root
+            and formula
+            and entry.get("formula") == formula
+            and entry.get("artifact") == "audit_candidates.jsonl"
+        ):
+            return entry
+    for entry in entries:
+        if root and entry.get("root") == root and formula and entry.get("formula") == formula:
+            return entry
+    for entry in entries:
+        if root and entry.get("root") == root and entry.get("artifact") == "audit_candidates.jsonl":
+            return entry
+    for entry in entries:
+        if root and entry.get("root") == root:
+            return entry
     for entry in entries:
         if formula and entry.get("formula") == formula and entry.get("artifact") == "audit_candidates.jsonl":
             return entry
