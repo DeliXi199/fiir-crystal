@@ -179,7 +179,8 @@ def test_sbatch_plan_requests_all_currently_free_resources() -> None:
     )
 
     request = plan["request"]
-    assert request["node"] == "gpuh2002"
+    assert request["node"] is None
+    assert request["reference_node"] == "gpuh2002"
     assert request["gpus"] == 6
     assert request["cpus"] == 128
     assert request["memory_mb"] == 1_500_000
@@ -187,8 +188,7 @@ def test_sbatch_plan_requests_all_currently_free_resources() -> None:
     assert request["exclusive"] is False
     assert request["uses_all_currently_free_gpus"] is True
     assert request["uses_all_currently_free_cpus"] is True
-    assert "--nodelist" in plan["sbatch_args"]
-    assert "gpuh2002" in plan["sbatch_args"]
+    assert "--nodelist" not in plan["sbatch_args"]
     assert "--cpus-per-task" in plan["sbatch_args"]
     assert "128" in plan["sbatch_args"]
     assert "--mem" in plan["sbatch_args"]
@@ -208,8 +208,9 @@ def test_partition_filter_can_choose_idle_4090_node() -> None:
     plan = build_sbatch_plan(selection)
     assert plan["request"]["gpus"] == 8
     assert plan["request"]["cpus"] == 32
-    assert plan["request"]["exclusive"] is True
-    assert "--exclusive" in plan["sbatch_args"]
+    assert plan["request"]["exclusive"] is False
+    assert "--exclusive" not in plan["sbatch_args"]
+    assert "--nodelist" not in plan["sbatch_args"]
     assert "gpu:rtx4090:8" in plan["sbatch_args"]
 
 
@@ -272,7 +273,41 @@ NodeName=test001 Arch=x86_64 CoresPerSocket=32
     assert "00:30:00" in short["sbatch"]["sbatch_args"]
 
 
-def test_test_gpu_partition_still_uses_resource_ranking() -> None:
+def test_test_gpu_partition_is_fallback_even_when_it_has_higher_raw_score() -> None:
+    text = """
+NodeName=test001 Arch=x86_64 CoresPerSocket=32
+   CPUAlloc=0 CPUEfctv=64 CPUTot=64 CPULoad=0.01
+   Gres=gpu:rtx4090:2
+   State=IDLE ThreadsPerCore=1
+   Partitions=test
+   RealMemory=256000 AllocMem=0 FreeMem=240000
+   CfgTRES=cpu=64,mem=256000M,billing=64,gres/gpu=2
+   AllocTRES=
+
+NodeName=gpuh20small Arch=x86_64 CoresPerSocket=16
+   CPUAlloc=28 CPUEfctv=32 CPUTot=32 CPULoad=8.00
+   Gres=gpu:H20:8
+   State=MIXED ThreadsPerCore=1
+   Partitions=h20
+   RealMemory=500000 AllocMem=0 FreeMem=100000
+   CfgTRES=cpu=32,mem=500000M,billing=32,gres/gpu=8
+   AllocTRES=cpu=28,gres/gpu=7
+"""
+    plan = plan_gpu_job(
+        parse_scontrol_nodes(text),
+        GpuSchedulingConfig(accelerator="cuda", time_limit_minutes=30),
+        time_limit="00:30:00",
+    )
+
+    assert plan["ready"] is True
+    assert plan["reason"] == "highest_tf32_gpu_compute_capacity"
+    assert plan["selection"]["selected_node"]["name"] == "gpuh20small"
+    assert plan["selection"]["selected_partition"] == "h20"
+    candidate_names = [item["node"]["name"] for item in plan["selection"]["candidates"]]
+    assert candidate_names == ["gpuh20small"]
+
+
+def test_test_gpu_partition_is_used_for_short_job_when_no_non_test_gpu_is_free() -> None:
     text = """
 NodeName=test001 Arch=x86_64 CoresPerSocket=32
    CPUAlloc=0 CPUEfctv=64 CPUTot=64 CPULoad=0.01
@@ -284,13 +319,13 @@ NodeName=test001 Arch=x86_64 CoresPerSocket=32
    AllocTRES=
 
 NodeName=gpu40902 Arch=x86_64 CoresPerSocket=16
-   CPUAlloc=0 CPUEfctv=32 CPUTot=32 CPULoad=0.02
+   CPUAlloc=32 CPUEfctv=32 CPUTot=32 CPULoad=2.00
    Gres=gpu:rtx4090:8
-   State=IDLE ThreadsPerCore=1
+   State=ALLOCATED ThreadsPerCore=1
    Partitions=gpu4090_8
    RealMemory=500000 AllocMem=0 FreeMem=494715
    CfgTRES=cpu=32,mem=500000M,billing=32,gres/gpu=8
-   AllocTRES=
+   AllocTRES=cpu=32,gres/gpu=8
 """
     plan = plan_gpu_job(
         parse_scontrol_nodes(text),
@@ -299,10 +334,9 @@ NodeName=gpu40902 Arch=x86_64 CoresPerSocket=16
     )
 
     assert plan["ready"] is True
-    assert plan["selection"]["selected_node"]["name"] == "gpu40902"
-    assert plan["selection"]["selected_partition"] == "gpu4090_8"
-    candidate_names = [item["node"]["name"] for item in plan["selection"]["candidates"]]
-    assert candidate_names == ["gpu40902", "test001"]
+    assert plan["reason"] == "short_gpu_job_test_fallback_after_no_non_test_gpu_free"
+    assert plan["selection"]["selected_node"]["name"] == "test001"
+    assert plan["selection"]["selected_partition"] == "test"
 
 
 def test_long_gpu_job_auto_prefers_best_free_gpu_node_before_flexible_queue() -> None:
@@ -314,13 +348,69 @@ def test_long_gpu_job_auto_prefers_best_free_gpu_node_before_flexible_queue() ->
 
     assert plan["ready"] is True
     assert plan["reason"] == "highest_tf32_gpu_compute_capacity"
-    assert plan["config"]["effective_queue_mode"] == "pinned"
+    assert plan["config"]["effective_queue_mode"] == "partition"
     assert plan["selection"]["selected_node"]["name"] == "gpuh2002"
     assert plan["selection"]["selected_partition"] == "h200"
-    assert plan["sbatch"]["request"]["node"] == "gpuh2002"
+    assert plan["sbatch"]["request"]["node"] is None
+    assert plan["sbatch"]["request"]["reference_node"] == "gpuh2002"
     assert plan["sbatch"]["request"]["partition"] == "h200"
-    assert "--nodelist" in plan["sbatch"]["sbatch_args"]
-    assert "gpuh2002" in plan["sbatch"]["sbatch_args"]
+    assert "--nodelist" not in plan["sbatch"]["sbatch_args"]
+
+
+def test_auto_batch_reserved_nodes_claim_free_nodes_then_queue_flexibly() -> None:
+    text = """
+NodeName=gpuh2001 Arch=x86_64 CoresPerSocket=48
+   CPUAlloc=120 CPUEfctv=192 CPUTot=192 CPULoad=64.00
+   Gres=gpu:8
+   State=MIXED ThreadsPerCore=2
+   Partitions=h200
+   RealMemory=2000000 AllocMem=0 FreeMem=1500000
+   CfgTRES=cpu=192,mem=2000000M,billing=192,gres/gpu=8
+   AllocTRES=cpu=120
+
+NodeName=gpuh2002 Arch=x86_64 CoresPerSocket=48
+   CPUAlloc=120 CPUEfctv=192 CPUTot=192 CPULoad=64.00
+   Gres=gpu:8
+   State=MIXED ThreadsPerCore=2
+   Partitions=h200
+   RealMemory=2000000 AllocMem=0 FreeMem=1200000
+   CfgTRES=cpu=192,mem=2000000M,billing=192,gres/gpu=8
+   AllocTRES=cpu=120
+"""
+    nodes = parse_scontrol_nodes(text)
+    base = {
+        "accelerator": "cuda",
+        "min_gpus": 8,
+        "min_cpus": 32,
+        "queue_min_gpus": 8,
+        "queue_min_cpus": 32,
+        "time_limit_minutes": 120,
+    }
+
+    first = plan_gpu_job(nodes, GpuSchedulingConfig(**base), time_limit="02:00:00")
+    second = plan_gpu_job(
+        nodes,
+        GpuSchedulingConfig(**base, reserved_nodes=("gpuh2001",)),
+        time_limit="02:00:00",
+    )
+    queued = plan_gpu_job(
+        nodes,
+        GpuSchedulingConfig(**base, reserved_nodes=("gpuh2001", "gpuh2002")),
+        time_limit="02:00:00",
+    )
+
+    assert first["config"]["effective_queue_mode"] == "partition"
+    assert first["selection"]["selected_node"]["name"] == "gpuh2001"
+    assert second["config"]["reserved_nodes"] == ["gpuh2001"]
+    assert second["config"]["effective_queue_mode"] == "partition"
+    assert second["selection"]["selected_node"]["name"] == "gpuh2002"
+    assert queued["config"]["reserved_nodes"] == ["gpuh2001", "gpuh2002"]
+    assert queued["config"]["effective_queue_mode"] == "flexible"
+    assert queued["selection"]["selected_node"] is None
+    assert queued["selection"]["candidate_partitions"] == ["h200"]
+    assert queued["sbatch"]["request"]["node"] is None
+    assert queued["sbatch"]["request"]["memory_mb"] == 256_000
+    assert "--nodelist" not in queued["sbatch"]["sbatch_args"]
 
 
 def test_long_gpu_job_auto_falls_back_to_flexible_queue_when_no_free_long_gpu() -> None:
@@ -444,7 +534,7 @@ NodeName=gpuh20llm1 Arch=x86_64 CoresPerSocket=48
     )
 
     assert plan["ready"] is True
-    assert plan["config"]["effective_queue_mode"] == "pinned"
+    assert plan["config"]["effective_queue_mode"] == "partition"
     assert plan["selection"]["selected_node"]["gpu_model_key"] == "h20"
     assert plan["selection"]["selected_partition"] == "h20llm"
     assert plan["sbatch"]["request"]["gres"] == "gpu:H20:8"
@@ -486,6 +576,44 @@ NodeName=gpu40902 Arch=x86_64 CoresPerSocket=16
     assert plan["selection"]["candidate_partitions"] == ["gpu4090_8"]
     assert plan["sbatch"]["request"]["partition"] == "gpu4090_8"
     assert "--nodelist" not in plan["sbatch"]["sbatch_args"]
+
+
+def test_flexible_gpu_queue_excludes_test_when_normal_gpu_partition_is_queueable() -> None:
+    text = """
+NodeName=test001 Arch=x86_64 CoresPerSocket=32
+   CPUAlloc=0 CPUEfctv=64 CPUTot=64 CPULoad=0.01
+   Gres=gpu:rtx4090:2
+   State=IDLE ThreadsPerCore=1
+   Partitions=test
+   RealMemory=256000 AllocMem=0 FreeMem=240000
+   CfgTRES=cpu=64,mem=256000M,billing=64,gres/gpu=2
+   AllocTRES=
+
+NodeName=gpu40902 Arch=x86_64 CoresPerSocket=16
+   CPUAlloc=32 CPUEfctv=32 CPUTot=32 CPULoad=2.00
+   Gres=gpu:rtx4090:8
+   State=ALLOCATED ThreadsPerCore=1
+   Partitions=gpu4090_8
+   RealMemory=512000 AllocMem=0 FreeMem=494715
+   CfgTRES=cpu=32,mem=512000M,billing=32,gres/gpu=8
+   AllocTRES=cpu=32,gres/gpu=8
+"""
+    plan = plan_gpu_job(
+        parse_scontrol_nodes(text),
+        GpuSchedulingConfig(
+            accelerator="cuda",
+            allowed_partitions=("gpu4090_8", "test"),
+            queue_mode="flexible",
+            queue_min_gpus=2,
+            time_limit_minutes=30,
+        ),
+        time_limit="00:30:00",
+    )
+
+    assert plan["ready"] is True
+    assert plan["selection"]["candidate_partitions"] == ["gpu4090_8"]
+    assert plan["sbatch"]["request"]["partition"] == "gpu4090_8"
+    assert "test" not in plan["sbatch"]["request"]["candidate_partitions"]
 
 
 def test_parse_slurm_time_limit_minutes_ceilings_seconds() -> None:
@@ -534,4 +662,6 @@ def test_plan_gpu_job_cli_writes_json_from_fixture(tmp_path: Path) -> None:
     assert saved["selection"]["selected_node"]["name"] == "gpu40902"
     assert saved["sbatch"]["request"]["gpus"] == 8
     assert saved["sbatch"]["request"]["cpus"] == 32
-    assert saved["sbatch"]["request"]["exclusive"] is True
+    assert saved["sbatch"]["request"]["exclusive"] is False
+    assert saved["sbatch"]["request"]["node"] is None
+    assert "--nodelist" not in saved["sbatch"]["sbatch_args"]

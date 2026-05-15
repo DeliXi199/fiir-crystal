@@ -149,6 +149,7 @@ class GpuSchedulingConfig:
     test_partition: str = DEFAULT_TEST_PARTITION
     test_partition_max_minutes: int = DEFAULT_TEST_PARTITION_MAX_MINUTES
     queue_mode: str = "auto"
+    reserved_nodes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         profile = normalize_precision_profile(self.precision_profile)
@@ -171,6 +172,11 @@ class GpuSchedulingConfig:
             object.__setattr__(self, "gpu_weights", gpu_weights_for_profile(profile))
         else:
             object.__setattr__(self, "gpu_weights", dict(self.gpu_weights))
+        object.__setattr__(
+            self,
+            "reserved_nodes",
+            tuple(dict.fromkeys(node.strip() for node in self.reserved_nodes if node.strip())),
+        )
 
 
 @dataclass(frozen=True)
@@ -347,7 +353,12 @@ def select_best_gpu_node(
     if not scored:
         return None
 
-    scored.sort(
+    non_test_scored = [
+        item for item in scored if not partition_is_test(item[2], config)
+    ]
+    selected_pool = non_test_scored or scored
+
+    selected_pool.sort(
         key=lambda item: (
             -item[0],
             -item[1].free_gpus,
@@ -355,32 +366,33 @@ def select_best_gpu_node(
             item[1].name,
         )
     )
-    score, node, partition = scored[0]
+    score, node, partition = selected_pool[0]
     candidates = tuple(
         {
             "node": candidate.to_dict(),
             "partition": candidate_partition,
             "score": candidate_score,
         }
-        for candidate_score, candidate, candidate_partition in scored
+        for candidate_score, candidate, candidate_partition in selected_pool
     )
+    reason = f"highest_{config.precision_profile}_gpu_compute_capacity"
+    if partition_is_test(partition, config):
+        reason = "short_gpu_job_test_fallback_after_no_non_test_gpu_free"
     return GpuSelection(
         node=node,
         partition=partition,
         score=score,
-        reason=f"highest_{config.precision_profile}_gpu_compute_capacity",
+        reason=reason,
         candidates=candidates,
     )
 
 
 def node_is_eligible(node: GpuNode, config: GpuSchedulingConfig) -> bool:
+    if node.name in config.reserved_nodes:
+        return False
     if not _state_allows_new_work(node.state):
         return False
     if node.free_gpus < config.min_gpus:
-        return False
-    if node.idle_cpus < config.min_cpus:
-        return False
-    if node.free_memory_mb < config.min_memory_mb:
         return False
     if config.allowed_partitions and not set(node.partitions).intersection(config.allowed_partitions):
         return False
@@ -403,11 +415,15 @@ def node_is_cuda_compatible(node: GpuNode) -> bool:
 
 def partition_allows_time_limit(partition: str, config: GpuSchedulingConfig) -> bool:
     normalized = partition.strip().rstrip("*")
-    if normalized != config.test_partition:
+    if not partition_is_test(normalized, config):
         return True
     if config.time_limit_minutes is None:
         return False
     return config.time_limit_minutes <= config.test_partition_max_minutes
+
+
+def partition_is_test(partition: str, config: GpuSchedulingConfig) -> bool:
+    return partition.strip().rstrip("*") == config.test_partition
 
 
 def score_node(node: GpuNode, config: GpuSchedulingConfig) -> float:
@@ -426,36 +442,53 @@ def build_sbatch_plan(
     layout: str = "single-task",
     exclusive_when_full_node: bool = True,
     submit_script: str | None = None,
+    request_gpus: int | None = None,
+    request_cpus: int | None = None,
+    request_memory_mb: int | None = None,
+    pin_node: bool = False,
 ) -> dict[str, Any]:
-    """Build deterministic sbatch args that request all free GPUs/CPUs."""
+    """Build deterministic partition-wide sbatch args for a selected GPU class.
+
+    The selected node is a reference used to choose a GPU-compatible partition
+    and GRES shape. The generated submission intentionally avoids `--nodelist`
+    by default so SLURM can place the job on any node in that partition with
+    enough free GPUs.
+    """
 
     node = selection.node
-    gpu_count = node.free_gpus
-    cpu_count = node.idle_cpus
-    if gpu_count < 1 or cpu_count < 1:
-        raise ValueError("selected node has no free GPU or CPU resources")
+    gpu_count = int(request_gpus) if request_gpus is not None else node.free_gpus
+    cpu_count = int(request_cpus) if request_cpus is not None else node.idle_cpus
+    if cpu_count < 1:
+        cpu_count = node.total_cpus or 1
+    if gpu_count < 1:
+        raise ValueError("selected node has no free GPU resources")
+    if gpu_count > node.free_gpus:
+        raise ValueError("requested GPU count exceeds selected node free GPUs")
     args = [
         "--nodes",
         "1",
         "--partition",
         selection.partition,
-        "--nodelist",
-        node.name,
         "--job-name",
         job_name,
         "--gres",
         node.gres_request(gpu_count),
     ]
+    if pin_node:
+        args[4:4] = ["--nodelist", node.name]
     if account:
         args.extend(["--account", account])
     if time_limit:
         args.extend(["--time", time_limit])
-    memory_mb = node.free_memory_mb
-    if node.total_memory_mb > 0:
-        memory_mb = min(memory_mb, node.total_memory_mb) if memory_mb > 0 else node.total_memory_mb
+    if request_memory_mb is not None:
+        memory_mb = int(request_memory_mb)
+    else:
+        memory_mb = node.free_memory_mb
+        if node.total_memory_mb > 0:
+            memory_mb = min(memory_mb, node.total_memory_mb) if memory_mb > 0 else node.total_memory_mb
     if memory_mb > 0:
         args.extend(["--mem", f"{memory_mb}M"])
-    exclusive = node.is_fully_idle and exclusive_when_full_node
+    exclusive = pin_node and node.is_fully_idle and exclusive_when_full_node
     if exclusive:
         args.append("--exclusive")
     if layout == "one-task-per-gpu":
@@ -470,7 +503,7 @@ def build_sbatch_plan(
         raise ValueError(f"unknown GPU task layout: {layout}")
 
     env_items = {
-        "FIIR_GPU_NODE": node.name,
+        "FIIR_GPU_NODE": node.name if pin_node else "slurm_assigned_at_runtime",
         "FIIR_GPU_PARTITION": selection.partition,
         "FIIR_TOTAL_GPUS": str(gpu_count),
         "FIIR_TOTAL_CPU_CORES": str(cpu_count),
@@ -487,7 +520,8 @@ def build_sbatch_plan(
         "sbatch_command": command,
         "sbatch_command_quoted": " ".join(shlex.quote(part) for part in command),
         "request": {
-            "node": node.name,
+            "node": node.name if pin_node else None,
+            "reference_node": node.name,
             "partition": selection.partition,
             "gpus": gpu_count,
             "cpus": cpu_count,
@@ -497,8 +531,10 @@ def build_sbatch_plan(
             "cpus_per_task": cpus_per_task,
             "unassigned_cpu_cores": unassigned_cpus,
             "exclusive": exclusive,
-            "uses_all_currently_free_gpus": True,
-            "uses_all_currently_free_cpus": layout == "single-task" or unassigned_cpus == 0,
+            "uses_all_currently_free_gpus": gpu_count == node.free_gpus,
+            "uses_all_currently_free_cpus": cpu_count == node.idle_cpus
+            and (layout == "single-task" or unassigned_cpus == 0),
+            "queue_mode": "pinned" if pin_node else "partition",
         },
     }
 
@@ -634,12 +670,16 @@ def plan_gpu_job(
             selection,
             layout=config.layout,
             exclusive_when_full_node=config.exclusive_when_full_node,
+            request_gpus=min(max(config.min_gpus, config.queue_min_gpus), selection.node.free_gpus),
+            request_cpus=config.queue_min_cpus,
+            request_memory_mb=config.queue_memory_mb,
+            pin_node=False,
             **sbatch_kwargs,
         )
         return {
             "ready": True,
             "reason": selection.reason,
-            "config": config_to_dict(config, effective_queue_mode_override="pinned"),
+            "config": config_to_dict(config, effective_queue_mode_override="partition"),
             "selection": selection.to_dict(),
             "sbatch": sbatch,
         }
@@ -708,13 +748,14 @@ def config_to_dict(
         "test_partition_max_minutes": config.test_partition_max_minutes,
         "queue_mode": config.queue_mode,
         "effective_queue_mode": effective_queue_mode_override or effective_queue_mode(config),
+        "reserved_nodes": list(config.reserved_nodes),
     }
 
 
 def effective_queue_mode(config: GpuSchedulingConfig) -> str:
     if config.queue_mode != "auto":
         return config.queue_mode
-    return "pinned_then_flexible_on_no_free_gpu"
+    return "partition_then_flexible_on_no_free_gpu"
 
 
 def flexible_queue_partitions(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -> tuple[str, ...]:
@@ -726,8 +767,14 @@ def flexible_queue_partitions(nodes: Sequence[GpuNode], config: GpuSchedulingCon
                 if partition in allowed and partition_allows_time_limit(partition, config):
                     matching_from_nodes.append(partition)
         if matching_from_nodes:
-            return tuple(
-                sorted(dict.fromkeys(matching_from_nodes), key=lambda item: (_partition_rank(item), item))
+            return fallback_ordered_partitions(
+                tuple(
+                    sorted(
+                        dict.fromkeys(matching_from_nodes),
+                        key=lambda item: (_partition_rank(item), item),
+                    )
+                ),
+                config,
             )
         if nodes:
             return ()
@@ -736,7 +783,10 @@ def flexible_queue_partitions(nodes: Sequence[GpuNode], config: GpuSchedulingCon
             for partition in allowed
             if partition_allows_time_limit(partition, config)
         ]
-        return tuple(sorted(dict.fromkeys(candidates), key=lambda item: (_partition_rank(item), item)))
+        return fallback_ordered_partitions(
+            tuple(sorted(dict.fromkeys(candidates), key=lambda item: (_partition_rank(item), item))),
+            config,
+        )
     partitions: list[str] = []
     for node in queueable_gpu_nodes(nodes, config):
         for partition in node.partitions:
@@ -744,7 +794,18 @@ def flexible_queue_partitions(nodes: Sequence[GpuNode], config: GpuSchedulingCon
                 continue
             if partition not in partitions:
                 partitions.append(partition)
-    return tuple(sorted(partitions, key=lambda item: (_partition_rank(item), item)))
+    return fallback_ordered_partitions(
+        tuple(sorted(partitions, key=lambda item: (_partition_rank(item), item))),
+        config,
+    )
+
+
+def fallback_ordered_partitions(partitions: Sequence[str], config: GpuSchedulingConfig) -> tuple[str, ...]:
+    """Return queue partitions with `test` only when no normal GPU partition exists."""
+
+    unique = tuple(dict.fromkeys(partitions))
+    non_test = tuple(partition for partition in unique if not partition_is_test(partition, config))
+    return non_test or unique
 
 
 def queueable_gpu_nodes(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -> tuple[GpuNode, ...]:
@@ -770,11 +831,6 @@ def node_is_queueable(node: GpuNode, config: GpuSchedulingConfig) -> bool:
     if not _state_allows_queueing(node.state):
         return False
     if node.total_gpus < config.queue_min_gpus:
-        return False
-    if node.total_cpus < config.queue_min_cpus:
-        return False
-    required_memory_mb = max(config.min_memory_mb, config.queue_memory_mb)
-    if node.total_memory_mb < required_memory_mb:
         return False
     if config.allowed_partitions and not set(node.partitions).intersection(config.allowed_partitions):
         return False

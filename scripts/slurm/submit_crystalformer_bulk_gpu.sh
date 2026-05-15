@@ -34,6 +34,8 @@ FIIR_TIME_LIMIT="${FIIR_TIME_LIMIT:-}"
 FIIR_DRY_RUN="${FIIR_DRY_RUN:-0}"
 FIIR_SLURM_LOG_DIR="${FIIR_SLURM_LOG_DIR:-logs/slurm}"
 FIIR_GPU_PLAN_JSON="${FIIR_GPU_PLAN_JSON:-outputs/slurm_gpu_plans/crystalformer_bulk_gpu_plan.json}"
+FIIR_GPU_RESERVED_NODES="${FIIR_GPU_RESERVED_NODES:-}"
+FIIR_GPU_RESERVED_NODES_FILE="${FIIR_GPU_RESERVED_NODES_FILE:-}"
 FIIR_PLANNER_PYTHON="${FIIR_PLANNER_PYTHON:-python}"
 
 export FIIR_CONDA_ENV="${FIIR_CONDA_ENV:-crystalformer}"
@@ -74,6 +76,34 @@ require_integer "FIIR_GPU_QUEUE_MEMORY_MB" "$FIIR_GPU_QUEUE_MEMORY_MB"
 mkdir -p "$FIIR_SLURM_LOG_DIR"
 mkdir -p "$(dirname "$FIIR_GPU_PLAN_JSON")"
 
+reserved_nodes=()
+
+add_reserved_node() {
+  local node="$1"
+  node="${node#"${node%%[![:space:]]*}"}"
+  node="${node%"${node##*[![:space:]]}"}"
+  if [ -z "$node" ]; then
+    return
+  fi
+  local existing
+  for existing in "${reserved_nodes[@]}"; do
+    if [ "$existing" = "$node" ]; then
+      return
+    fi
+  done
+  reserved_nodes+=("$node")
+}
+
+for node in ${FIIR_GPU_RESERVED_NODES//,/ }; do
+  add_reserved_node "$node"
+done
+
+if [ -n "$FIIR_GPU_RESERVED_NODES_FILE" ] && [ -f "$FIIR_GPU_RESERVED_NODES_FILE" ]; then
+  while IFS= read -r node; do
+    add_reserved_node "$node"
+  done < "$FIIR_GPU_RESERVED_NODES_FILE"
+fi
+
 planner_args=(
   "$FIIR_PLANNER_PYTHON"
   "scripts/slurm/plan_slurm_job.py"
@@ -108,6 +138,10 @@ planner_args=(
   "--output-json"
   "$FIIR_GPU_PLAN_JSON"
 )
+
+# Reserved-node files are kept for provenance and backward compatibility, but
+# partition-wide GPU submissions no longer pass --reserved-node to the planner.
+# SLURM should choose any node in the selected partition with enough free GPUs.
 
 if ! is_auto_partition_set "$FIIR_GPU_PARTITIONS"; then
   for partition in ${FIIR_GPU_PARTITIONS//,/ }; do
@@ -146,10 +180,16 @@ echo "  queue_min_cpus=${FIIR_GPU_QUEUE_MIN_CPUS}"
 echo "  queue_memory_mb=${FIIR_GPU_QUEUE_MEMORY_MB}"
 echo "  layout=${FIIR_GPU_LAYOUT}"
 echo "  precision_profile=${FIIR_GPU_PRECISION_PROFILE}"
-echo "  gpu_queue_mode=${FIIR_GPU_QUEUE_MODE} (auto pins the best free eligible GPU node and falls back to flexible queueing only when none is free)"
+echo "  gpu_queue_mode=${FIIR_GPU_QUEUE_MODE} (auto chooses a free eligible non-test GPU partition without --nodelist, uses test only as a short-job fallback, and falls back to flexible queueing only when no normal partition has enough free GPUs)"
+if [ "${#reserved_nodes[@]}" -gt 0 ]; then
+  echo "  batch_reserved_nodes=${reserved_nodes[*]}"
+else
+  echo "  batch_reserved_nodes=none"
+fi
+echo "  batch_reserved_nodes_file=${FIIR_GPU_RESERVED_NODES_FILE:-none}"
 echo "  slurm_account=${FIIR_SLURM_ACCOUNT:-none}"
 echo "  time_limit=${FIIR_TIME_LIMIT:-planner_default}"
-echo "  test_partition_time_guard=eligible only when FIIR_TIME_LIMIT is <= 00:30:00; normal GPU resource ranking still applies"
+echo "  test_partition_policy=eligible only when FIIR_TIME_LIMIT is <= 00:30:00, and used only when no non-test GPU partition has enough free GPUs"
 echo "  conda_env=${FIIR_CONDA_ENV}"
 echo "  require_jax_gpu=${FIIR_REQUIRE_JAX_GPU}"
 echo "  xla_python_client_preallocate=${XLA_PYTHON_CLIENT_PREALLOCATE}"
@@ -166,6 +206,7 @@ echo "$planner_output"
 
 job_id="$(printf '%s\n' "$planner_output" | awk '/Submitted batch job/ { print $4; exit }')"
 if [ -n "$job_id" ]; then
+  echo "  batch_reserved_node_added=none (partition-wide submissions do not claim a fixed node)"
   echo "Startup monitor command:"
   echo "  scripts/slurm/monitor_slurm_startup.sh --job-id ${job_id}"
   echo "  For new templates, new environments, or new scales, use: scripts/slurm/monitor_slurm_startup.sh --job-id ${job_id} --seconds 300"

@@ -79,12 +79,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     gpu.add_argument("--gpu-weight", action="append", default=[], help="Override a GPU weight as name=value.")
     gpu.add_argument(
+        "--reserved-node",
+        action="append",
+        default=[],
+        help=(
+            "Treat a node as already claimed by an earlier job in the same "
+            "submission batch; repeat or comma-separate."
+        ),
+    )
+    gpu.add_argument(
         "--gpu-queue-mode",
         choices=("auto", "pinned", "flexible"),
         default="auto",
         help=(
-            "GPU queue mode. auto pins the best currently free eligible node and "
-            "falls back to flexible multi-partition queueing only when no eligible node is free."
+            "GPU queue mode. auto chooses the best currently free eligible GPU partition "
+            "without --nodelist and falls back to flexible multi-partition queueing "
+            "only when no normal GPU partition has enough free GPUs."
         ),
     )
 
@@ -183,6 +193,7 @@ def _build_plan(args: argparse.Namespace) -> dict[str, Any]:
         gpu_weights=parse_gpu_weights(args.gpu_weight, precision_profile=args.precision_profile),
         time_limit_minutes=parse_slurm_time_limit_minutes(args.time),
         queue_mode=args.gpu_queue_mode,
+        reserved_nodes=parse_partition_list(args.reserved_node),
     )
     return plan_slurm_job(
         kind="gpu",
@@ -228,16 +239,18 @@ def _print_summary(plan: dict[str, Any], output_json: str | None) -> None:
         print(f"  selected_core_budget: {request['cpus'] if request['cpus'] is not None else 'auto'}")
     else:
         node = selection["selected_node"]
-        print(f"  selected_node: {node['name'] if node else 'slurm_assigned_at_runtime'}")
+        print(f"  reference_node: {node['name'] if node else 'slurm_assigned_at_runtime'}")
         print(f"  selected_partition: {selection['selected_partition']}")
         print(f"  gpu_model: {node['gpu_model_key'] if node else 'slurm_assigned_at_runtime'}")
         print(f"  precision_profile: {plan['config']['precision_profile']}")
         print(f"  gpu_queue_mode: {plan['config']['effective_queue_mode']}")
+        if plan["config"]["effective_queue_mode"] == "partition":
+            print("  placement: partition-wide_no_nodelist")
         if selection["selected_partition"] == plan["config"]["test_partition"]:
             print(
                 "  test_partition_time_guard: "
                 f"eligible only up to {plan['config']['test_partition_max_minutes']} minutes; "
-                "selection still uses the normal GPU resource score"
+                "used only after no non-test GPU node can start now"
             )
         print(f"  requested_gpus: {request['gpus']}")
         print(f"  requested_cpus: {request['cpus']}")

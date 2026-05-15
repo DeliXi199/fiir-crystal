@@ -80,6 +80,10 @@ def test_crystalformer_gpu_submitter_uses_unified_gpu_policy() -> None:
     assert "FIIR_GPU_PRECISION_PROFILE" in text
     assert "FIIR_GPU_QUEUE_MODE" in text
     assert "--gpu-queue-mode" in text
+    assert "FIIR_GPU_RESERVED_NODES" in text
+    assert "FIIR_GPU_RESERVED_NODES_FILE" in text
+    assert "--reserved-node" in text
+    assert "batch_reserved_nodes" in text
     assert "FIIR_GPU_QUEUE_MIN_GPUS" in text
     assert "FIIR_GPU_QUEUE_MIN_CPUS" in text
     assert "FIIR_GPU_QUEUE_MEMORY_MB" in text
@@ -96,8 +100,8 @@ def test_crystalformer_gpu_submitter_uses_unified_gpu_policy() -> None:
     assert "FIIR_REQUIRE_JAX_GPU" in text
     assert "XLA_PYTHON_CLIENT_PREALLOCATE" in text
     assert (
-        "test_partition_time_guard=eligible only when FIIR_TIME_LIMIT is <= 00:30:00; "
-        "normal GPU resource ranking still applies"
+        "test_partition_policy=eligible only when FIIR_TIME_LIMIT is <= 00:30:00, "
+        "and used only when no non-test GPU partition has enough free GPUs"
     ) in text
     assert "--run-sbatch" in text
     assert "FIIR_DRY_RUN" in text
@@ -128,6 +132,7 @@ def test_unified_slurm_planner_cli_exists() -> None:
     assert "CpuSchedulingConfig" in text
     assert "GpuSchedulingConfig" in text
     assert "--precision-profile" in text
+    assert "--reserved-node" in text
     assert "--gpu-queue-mode" in text
     assert "--shell-vars" in text
     assert "--run-sbatch" in text
@@ -163,9 +168,10 @@ def test_slurm_readme_documents_auto_gpu_partition_selection() -> None:
 
     assert "FIIR_GPU_PARTITIONS=auto" in text
     assert "currently available CUDA-compatible GPU nodes" in text
-    assert "The `test` partition is part of the CUDA-compatible GPU policy" in text
-    assert "same resource-aware ranking" in text
-    assert "30 minutes or less" in text
+    assert "The `test` partition is non-preferred CUDA-compatible GPU capacity" in text
+    assert "no non-`test` GPU partition has enough free GPUs to" in text
+    assert "GPU start-now eligibility" in text
+    assert "30\nminutes or less" in text
     assert "flexible multi-partition queueing" in text
     assert "does not use `--nodelist`" in text
     assert "8 GPUs and 32 CPUs" in text

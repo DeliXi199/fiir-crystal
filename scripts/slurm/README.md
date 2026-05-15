@@ -63,15 +63,16 @@ bash scripts/slurm/submit_crystalformer_bulk_gpu.sh
 The GPU submitter is also safe by default: without `FIIR_RUN_GENERATION=1`, the
 job only writes a bulk plan or validation summary. It exports
 `FIIR_CONDA_ENV=crystalformer` and requires a JAX GPU backend by default. In
-the default `auto` queue mode, it requests all currently free GPUs and CPU cores
-when the planner can pin a specific free node. If no eligible GPU node can
+the default `auto` queue mode, it chooses a currently free non-`test` GPU
+partition and submits without `--nodelist`, so SLURM can place the job on any
+node in that partition with enough free GPUs. If no normal GPU partition can
 start now, it queues without `--nodelist` using the broad fallback request of 8
 GPUs, 32 CPUs, and 256000M memory by default. The explicit memory request
 avoids SLURM expanding a broad multi-partition queue job to a full-node memory
 request such as 2000000M. In both modes it passes `FIIR_TOTAL_GPUS` plus
 `CUDA_VISIBLE_DEVICES` into the bulk runner. The runner then assigns one
 visible CUDA device per concurrent CrystalFormer subprocess and divides the
-selected CPU cores across those subprocesses. Generation subprocesses default
+requested CPU cores across those subprocesses. Generation subprocesses default
 to `JAX_PLATFORMS=cuda,cpu` because CrystalFormer sampling uses JAX callbacks
 that need a local CPU device while CUDA remains the primary backend.
 
@@ -93,14 +94,12 @@ Useful GPU submitter overrides:
   and the active precision profile. Use an explicit value such as
   `gpu4090_8` only when you intentionally want to restrict placement.
 - `FIIR_GPU_ACCELERATOR`: `cuda` or `any`, default `cuda`.
-- `FIIR_GPU_MIN_GPUS`, `FIIR_GPU_MIN_CPUS`, `FIIR_GPU_MIN_MEMORY_MB`: minimum remaining resources.
-  These filters are used for immediate pinned placement. For larger
-  CrystalFormer generation, MLIP validation, DPO smoke/evaluation, and similar
-  GPU compute jobs on current long-running CUDA partitions, use
-  `FIIR_GPU_MIN_GPUS=8`; use `FIIR_GPU_MIN_CPUS=32` when the job can run on
-  32-CPU 8-GPU nodes as well as H20/H200 nodes. If the planner pins an idle
-  H20/H200 node, it will still request the full currently free CPU count on
-  that node.
+- `FIIR_GPU_MIN_GPUS`: minimum free GPU count used to decide whether a
+  partition can start now. For larger CrystalFormer generation, MLIP
+  validation, DPO smoke/evaluation, and similar GPU compute jobs on current
+  long-running CUDA partitions, use `FIIR_GPU_MIN_GPUS=8`.
+- `FIIR_GPU_MIN_CPUS`, `FIIR_GPU_MIN_MEMORY_MB`: retained for compatibility,
+  but GPU start-now eligibility is based on free GPUs, not CPU or memory.
 - `FIIR_GPU_QUEUE_MIN_GPUS`, `FIIR_GPU_QUEUE_MIN_CPUS`: flexible queue request
   shape when no eligible GPU node is currently free. Defaults are 8 GPUs and
   32 CPUs. This fallback is intentionally broader than a 192-CPU H20/H200-only
@@ -109,11 +108,17 @@ Useful GPU submitter overrides:
   `256000` requests 256G-class memory for no-free-node flexible queueing.
   Override it when a workflow needs a different memory cap.
 - `FIIR_GPU_QUEUE_MODE`: `auto`, `pinned`, or `flexible`. Default `auto`
-  first uses pinned placement on the best currently free eligible GPU node,
-  then falls back to flexible multi-partition queueing only when no eligible
-  node has enough free resources. Use `flexible` explicitly only when the job
-  should wait on several eligible GPU partitions at once even if a node is
-  currently free.
+  first chooses the best currently free eligible GPU partition without
+  `--nodelist`, then falls back to flexible multi-partition queueing only when
+  no normal GPU partition has enough free GPUs. Use `flexible` explicitly only
+  when the job should wait on several eligible GPU partitions at once even if a
+  node is currently free.
+- `FIIR_GPU_RESERVED_NODES`: comma- or space-separated node names to skip when
+  choosing the reference partition. Partition-wide submissions do not claim a
+  fixed node.
+- `FIIR_GPU_RESERVED_NODES_FILE`: optional newline-delimited state file kept
+  for backward-compatible provenance. The wrapper no longer appends selected
+  nodes after submission because GPU jobs are partition-wide, not node-pinned.
 - `FIIR_SLURM_ACCOUNT`: account passed to `sbatch`, default `hmt03`.
 - `FIIR_REQUIRE_JAX_GPU`: set to `0` only for dry debugging without a GPU backend.
 - `FIIR_GPU_PLAN_JSON`: path for the deterministic GPU scheduling plan.
@@ -227,7 +232,7 @@ Resolved allocations are recorded in `bulk_summary.json` and
 
 Use the same unified planner with `--kind gpu` before launching optional local
 MLIP or other GPU work. The planner is read-only by default: it inspects SLURM
-node state, filters out nodes that do not meet the requested CUDA/GPU/CPU/memory
+node state, filters out nodes that do not meet the requested CUDA/GPU
 minimums, then ranks eligible nodes with the precision profile requested by the
 task:
 
@@ -235,8 +240,8 @@ task:
 score = free_gpus * gpu_weight[precision_profile][gpu_model]
 ```
 
-CPU cores and memory are used for eligibility checks and request sizing, not as
-default ranking signals. It submits only when `--run-sbatch` is passed
+CPU cores and memory are request-sizing knobs only; GPU start-now eligibility
+is based on free GPU count. It submits only when `--run-sbatch` is passed
 explicitly. The older `scripts/slurm/plan_gpu_job.py` entrypoint remains as a
 GPU-only compatibility wrapper.
 
@@ -246,27 +251,32 @@ submission should therefore be selected from the current cluster state unless a
 caller deliberately provides a partition allowlist.
 
 The GPU submit wrapper also defaults to `FIIR_GPU_QUEUE_MODE=auto`. In auto
-mode, the planner first uses the original resource-aware pinned strategy: pick
-the best currently free eligible GPU node and submit with `--nodelist`. Only
-when no eligible GPU node has enough free GPUs/CPUs to start now does auto fall
-back to flexible multi-partition queueing. Flexible mode does not use `--nodelist`;
-it requests the queued compatibility shape, 8 GPUs, 32 CPUs, and 256000M memory
-by default, and lets SLURM start the job on whichever eligible partition/node
-becomes available first. Set `FIIR_GPU_MIN_GPUS` to the GPU count the job should
-actually consume for pinned eligibility; set `FIIR_GPU_QUEUE_MIN_GPUS` and
-`FIIR_GPU_QUEUE_MIN_CPUS` only when the flexible queued shape needs an explicit
-override. Set `FIIR_GPU_QUEUE_MEMORY_MB` when the workflow needs more or less
-than the default 256G-class memory. Flexible mode still requests GPUs with
-`--gres` and must not be used as a CPU-only placement shortcut.
+mode, the planner first chooses the best currently free eligible normal GPU
+partition, submits with `--partition` and `--gres`, and deliberately omits
+`--nodelist`. CPU and memory do not decide whether a GPU partition is available
+now. Only when no non-`test` GPU partition has enough free GPUs to start now
+can a short bounded job fall back to `test`; only when no eligible GPU
+partition can start now does auto fall back to flexible multi-partition
+queueing. Flexible mode also does not use `--nodelist`; it requests the queued
+compatibility shape, 8 GPUs, 32 CPUs, and 256000M memory by default, and lets
+SLURM start the job on whichever eligible partition/node becomes available
+first. Set `FIIR_GPU_MIN_GPUS` to the GPU count the job should actually consume
+for start-now eligibility; set `FIIR_GPU_QUEUE_MIN_GPUS` and
+`FIIR_GPU_QUEUE_MIN_CPUS` only when the queued shape needs an explicit override.
+Set `FIIR_GPU_QUEUE_MEMORY_MB` when the workflow needs more or less than the
+default 256G-class memory. Flexible mode still requests GPUs with `--gres` and
+must not be used as a CPU-only placement shortcut.
 
-The `test` partition is part of the CUDA-compatible GPU policy and uses the
-same resource-aware ranking as every other GPU partition. It is not preferred
-just because a job is small: larger available GPU resources still win by the
-normal score. The extra rule is a time guard: `test` is eligible only when the
-requested time limit is explicitly 30 minutes or less, for example
-`--time 00:30:00` or `FIIR_TIME_LIMIT=00:30:00`. If no time limit is provided,
+The `test` partition is non-preferred CUDA-compatible GPU capacity. It is not
+part of the normal partition ranking when any non-`test` GPU partition can
+start the job. `test` is eligible only when the requested time limit is explicitly 30
+minutes or less, for example `--time 00:30:00` or
+`FIIR_TIME_LIMIT=00:30:00`, and is used only as a fallback after no non-`test`
+GPU partition has enough free GPUs to start now. If no time limit is provided,
 or if the requested time exceeds 30 minutes, `test` is skipped even if it has
-idle GPUs.
+idle GPUs. Flexible queueing also excludes `test` whenever any normal GPU
+partition is queueable; use an explicit `FIIR_GPU_PARTITIONS=test` allowlist
+only for a deliberate short test-only job.
 
 Use `--precision-profile tf32` for CrystalFormer/JAX generation and fast MACE
 single-point screening. Use `--precision-profile fp64` for MACE geometry
@@ -288,26 +298,25 @@ python scripts/slurm/plan_slurm_job.py \
   --output-json outputs/slurm_gpu_plans/mlip_gpu_smoke_plan.json
 ```
 
-In pinned mode, the generated plan requests one node, pins the selected node
-with `--nodelist`, requests all currently free GPUs with `--gres`, and requests
-all currently free CPU cores. For a fully idle node it also adds `--exclusive`;
-for a partially used `MIXED` node it requests only the remaining free resources
-and does not try to take resources already allocated to other jobs. In flexible
-mode, the generated plan queues on the candidate partition set, does not use
-`--nodelist`, and records that the final node will be assigned by SLURM at
-runtime.
+In auto partition mode, the generated plan requests one node in the selected
+partition, requests GPUs with `--gres`, requests the configured CPU/memory
+shape, and does not use `--nodelist`; the final node is assigned by SLURM at
+runtime. In flexible mode, the generated plan queues on the broader candidate
+partition set, also without `--nodelist`.
 
 Useful options:
 
 - `--partition gpu4090_8`: restrict selection to one or more partitions. Omit
   this option for resource-aware selection across all CUDA-compatible GPU
   partitions.
-- `--layout single-task`: one task receives all selected CPUs and GPUs.
-- `--layout one-task-per-gpu`: one task per free GPU, with CPU cores divided
+- `--layout single-task`: one task receives the requested CPUs and GPUs.
+- `--layout one-task-per-gpu`: one task per requested GPU, with CPU cores divided
   across tasks.
 - `--precision-profile tf32|fp64`: choose the GPU ranking weights for the
   task precision.
-- `--min-gpus`, `--min-cpus`, `--min-memory-mb`: minimum remaining resources.
+- `--min-gpus`: minimum free GPUs for start-now eligibility.
+- `--min-cpus`, `--min-memory-mb`: compatibility/request context; not GPU
+  availability filters in partition-wide mode.
 - `--queue-min-gpus`, `--queue-min-cpus`: flexible queue request shape used
   when no eligible node can start now; defaults are 8 GPUs and 32 CPUs.
 - `--queue-memory-mb`: flexible queue memory request; default is 256000 MB.
