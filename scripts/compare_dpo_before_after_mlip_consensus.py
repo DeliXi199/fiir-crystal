@@ -65,11 +65,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     summary = {
         "generated_at": date.today().isoformat(),
         "workflow": "matched_before_after_three_mlip_consensus_comparison",
-        "purpose": (
-            "Compare the completed 10 formulas x 20 samples CrystalFormer DPO "
-            "smoke before/after generation only after importing strict "
-            "MACE+CHGNet+MatGL relaxation consensus F3 proxy evidence."
-        ),
+        "purpose": _purpose(before, after),
         "matched_settings": generation.get("matched_settings", {}),
         "before": before,
         "after": after,
@@ -104,6 +100,15 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     return summary
 
 
+def _purpose(before: dict[str, Any], after: dict[str, Any]) -> str:
+    return (
+        "Compare completed matched CrystalFormer DPO before/after generation "
+        f"({before.get('candidate_count')} before candidates, "
+        f"{after.get('candidate_count')} after candidates) only after importing "
+        "strict MACE+CHGNet+MatGL relaxation consensus F3 proxy evidence."
+    )
+
+
 def _side_metrics(
     side: str,
     generation: dict[str, Any],
@@ -134,6 +139,8 @@ def _side_metrics(
     validator_stable_counts = (
         consensus.get("validator_stable_counts") if isinstance(consensus.get("validator_stable_counts"), dict) else {}
     )
+    validator_count = len(validator_stable_counts)
+    stable_vote_count = _sum_numeric_counts(validator_stable_counts)
     pairwise = consensus.get("pairwise_agreement") if isinstance(consensus.get("pairwise_agreement"), dict) else {}
     return {
         "side": side,
@@ -150,6 +157,18 @@ def _side_metrics(
         "unstable_consensus_count": unstable_count,
         "disagreement_count": disagreement_count,
         "all_three_agreement_rate": consensus.get("agreement_rate"),
+        "validator_count": validator_count,
+        "stable_vote_count": stable_vote_count,
+        "average_stable_votes_per_generated_candidate": _ratio(stable_vote_count, candidate_count),
+        "average_stable_vote_fraction_all_generated": _ratio(
+            stable_vote_count,
+            validator_count * candidate_count if validator_count and candidate_count else 0,
+        ),
+        "average_stable_votes_per_validated_candidate": _ratio(stable_vote_count, overlap_count),
+        "average_stable_vote_fraction_validated": _ratio(
+            stable_vote_count,
+            validator_count * overlap_count if validator_count and overlap_count else 0,
+        ),
         "pairwise_agreement_rate": {
             name: stats.get("agreement_rate")
             for name, stats in pairwise.items()
@@ -193,6 +212,11 @@ def _delta(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
         "unstable_consensus_count",
         "disagreement_count",
         "all_three_agreement_rate",
+        "stable_vote_count",
+        "average_stable_votes_per_generated_candidate",
+        "average_stable_vote_fraction_all_generated",
+        "average_stable_votes_per_validated_candidate",
+        "average_stable_vote_fraction_validated",
         "stable_consensus_rate",
         "stable_consensus_rate_among_f3_available",
         "preference_pair_yield",
@@ -227,6 +251,10 @@ def _proxy_divergence(before: dict[str, Any], after: dict[str, Any]) -> dict[str
     spacegroup_delta = _subtract(after.get("spacegroup_count"), before.get("spacegroup_count"))
     f1_delta = _subtract(after.get("f1_fail_rate"), before.get("f1_fail_rate"))
     f2_delta = _subtract(after.get("f2_fail_rate"), before.get("f2_fail_rate"))
+    average_stability_delta = _subtract(
+        after.get("average_stable_vote_fraction_all_generated"),
+        before.get("average_stable_vote_fraction_all_generated"),
+    )
     reasons: list[str] = []
     if _positive(stable_delta) and _negative(agreement_delta):
         reasons.append("stable consensus rate increased while all-three agreement rate decreased")
@@ -236,13 +264,18 @@ def _proxy_divergence(before: dict[str, Any], after: dict[str, Any]) -> dict[str
         reasons.append("stable consensus rate increased while diversity/coverage decreased")
     if _positive(stable_delta) and (_positive(f1_delta) or _positive(f2_delta)):
         reasons.append("stable consensus rate increased while F1/F2 fail rate increased")
-    if not _positive(stable_delta):
-        reasons.append("no observed strict-consensus stable-rate improvement in this small proxy audit")
+    if not _positive(stable_delta) and not _positive(average_stability_delta):
+        reasons.append("no observed strict-consensus stable-rate improvement in this matched proxy audit")
     return {
         "flag": bool(reasons),
         "reasons": reasons,
+        "primary_stability_signal": {
+            "stable_consensus_rate_delta": stable_delta,
+            "average_stable_vote_fraction_all_generated_delta": average_stability_delta,
+            "f1_fail_rate_delta": f1_delta,
+        },
         "interpretation": (
-            "This is a proxy-divergence screen on a 10x20 smoke audit. It cannot "
+            "This is a proxy-divergence screen on a matched offline-validation audit. It cannot "
             "prove reward hacking absence or presence; it only identifies signals "
             "that need a larger matched audit and DFT-backed fixed audit later."
         ),
@@ -277,8 +310,13 @@ def _report(summary: dict[str, Any]) -> str:
         ("strict three-MLIP stable consensus count", "strict_three_mlip_stable_consensus_count"),
         ("unstable consensus count", "unstable_consensus_count"),
         ("disagreement count", "disagreement_count"),
-        ("all-three agreement rate", "all_three_agreement_rate"),
+        ("stable vote count", "stable_vote_count"),
+        ("average stable votes per generated candidate", "average_stable_votes_per_generated_candidate"),
+        ("average stable vote fraction (all generated)", "average_stable_vote_fraction_all_generated"),
+        ("average stable votes per validated candidate", "average_stable_votes_per_validated_candidate"),
+        ("average stable vote fraction (validated)", "average_stable_vote_fraction_validated"),
         ("stable consensus rate", "stable_consensus_rate"),
+        ("all-three agreement rate", "all_three_agreement_rate"),
         ("preference-pair yield", "preference_pair_yield"),
         ("unique sequence fraction", "unique_sequence_fraction"),
         ("spacegroup count", "spacegroup_count"),
@@ -329,6 +367,10 @@ def _count_truthy(rows: list[dict[str, Any]], key: str) -> int:
 
 def _count_label(rows: list[dict[str, Any]], key: str, label: str) -> int:
     return sum(1 for row in rows if row.get(key) == label)
+
+
+def _sum_numeric_counts(counts: dict[str, Any]) -> int:
+    return sum(int(value) for value in counts.values() if isinstance(value, int | float) and not isinstance(value, bool))
 
 
 def _spacegroup(row: dict[str, Any]) -> Any:

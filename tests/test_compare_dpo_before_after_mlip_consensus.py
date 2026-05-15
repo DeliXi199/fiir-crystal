@@ -103,6 +103,14 @@ def test_comparison_report_flags_proxy_divergence(tmp_path: Path) -> None:
     assert summary["before"]["strict_three_mlip_stable_consensus_count"] == 1
     assert summary["after"]["strict_three_mlip_stable_consensus_count"] == 2
     assert summary["delta"]["stable_consensus_rate"] == 0.5
+    assert summary["before"]["average_stable_vote_fraction_all_generated"] == 0.5
+    assert summary["after"]["average_stable_vote_fraction_all_generated"] == 1.0
+    assert summary["delta"]["average_stable_vote_fraction_all_generated"] == 0.5
+    assert summary["reward_hacking_or_proxy_divergence"]["primary_stability_signal"][
+        "average_stable_vote_fraction_all_generated_delta"
+    ] == 0.5
     assert summary["reward_hacking_or_proxy_divergence"]["flag"] is True
     assert (output_dir / "summary.json").exists()
-    assert "not DFT" in (output_dir / "report.md").read_text(encoding="utf-8")
+    report = (output_dir / "report.md").read_text(encoding="utf-8")
+    assert "average stable vote fraction (all generated)" in report
+    assert "not DFT" in report
