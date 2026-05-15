@@ -252,6 +252,11 @@ def _candidate_snapshot(row: dict[str, Any]) -> dict[str, Any]:
         "parse_status",
         "raw_sequence_status",
         "raw_sequence_fields",
+        "species",
+        "frac_coords",
+        "lattice_matrix",
+        "structure_format",
+        "structure_ref",
     ):
         if key in row:
             snapshot[key] = row[key]

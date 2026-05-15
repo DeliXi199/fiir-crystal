@@ -26,6 +26,9 @@ def _candidate(
         "ranking_score": ranking_score,
         "fiir_score": 1.0 - ranking_score,
         "raw_sequence_fields": {"A": "[56, 22, 8, 8, 8]", "L": "[4, 4, 4, 90, 90, 90]"},
+        "species": ["Ba", "Ti", "O"],
+        "frac_coords": [[0.0, 0.0, 0.0]],
+        "lattice_matrix": [[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]],
     }
 
 
@@ -76,6 +79,8 @@ def test_plan_f4_novelty_audit_filters_and_shards_tasks(tmp_path: Path) -> None:
     assert {row["schema_version"] for row in tasks} == {"f4-audit-task-v1"}
     assert tasks[0]["reference_pool_manifest"] == str(output_dir / "reference_pool_manifest.json")
     assert tasks[0]["candidate_snapshot"]["raw_sequence_fields"]["A"] == "[56, 22, 8, 8, 8]"
+    assert tasks[0]["candidate_snapshot"]["species"] == ["Ba", "Ti", "O"]
+    assert tasks[0]["candidate_snapshot"]["lattice_matrix"][0] == [4.0, 0.0, 0.0]
     assert len(read_jsonl(output_dir / "shards" / "f4_audit_tasks_shard_0000.jsonl")) == 1
     assert len(read_jsonl(output_dir / "shards" / "f4_audit_tasks_shard_0001.jsonl")) == 1
     manifest = read_json(output_dir / "reference_pool_manifest.example.json")

@@ -171,6 +171,28 @@ python scripts/check_f4_novelty_audit_ready.py \
   --require-results
 ```
 
+## Run StructureMatcher Worker
+
+The external worker now runs a small control gate before interpreting candidate
+rows:
+
+```bash
+python experiments/run_f4_structure_matcher_audit.py \
+  --plan-json outputs/f4_novelty_audit/reference_pool_v1/f4_audit_plan.json \
+  --positive-control-count 3 \
+  --overwrite
+```
+
+The positive controls reuse known local reference structures as synthetic
+candidates and must produce high-leakage StructureMatcher matches. The
+no-bucket control deliberately uses a formula with no exact-formula bucket and
+must be reported as `no_exact_formula_reference` with zero confidence. A failed
+control gate exits nonzero unless `--allow-control-failures` is passed.
+
+The worker writes `f4_control_results.jsonl` alongside `f4_results.jsonl`.
+Treat `no_exact_formula_reference` as a reference-pool coverage gap, not as
+evidence of low leakage risk.
+
 ## Worker Output
 
 External workers should write:
