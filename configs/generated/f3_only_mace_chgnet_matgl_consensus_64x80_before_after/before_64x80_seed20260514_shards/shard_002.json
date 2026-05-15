@@ -1,0 +1,112 @@
+{
+  "crystalformer_work_dir": "external/CrystalFormer",
+  "checkpoint_dir": "outputs/crystalformer_dpo_runs/mace_chgnet_matgl_consensus_1024_20260513_smoke_prepare/after_checkpoint/beta_0.1_label_0_gamma_0_adam_bs_32_lr_1e-05_decay_0_clip_1_A_119_W_28_N_21_Nf_5_Kx_16_Kl_4_h0_256_l_16_H_8_k_32_m_256_e_256_drop_0.1",
+  "output_root": "outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/before_64x80_seed20260514_shard_002",
+  "parser_backend": "none",
+  "stability_mode": "unavailable_without_offline_validation",
+  "source_format": "auto",
+  "skip_existing": true,
+  "defaults": {
+    "num_samples": 80,
+    "top_k": 40
+  },
+  "command_template": "python ./main.py --optimizer none --restore_path {checkpoint_dir} --K {top_k} --temperature 1.0 --top_p 1.0 --seed 20260514 --num_samples {num_samples} --batchsize {num_samples} --formula {formula} --save_path {raw_output_dir}/output.csv",
+  "formulas": [
+    {
+      "formula": "LaAlO3"
+    },
+    {
+      "formula": "YAlO3"
+    },
+    {
+      "formula": "NdAlO3"
+    },
+    {
+      "formula": "PrAlO3"
+    },
+    {
+      "formula": "SmAlO3"
+    },
+    {
+      "formula": "GdAlO3"
+    },
+    {
+      "formula": "DyAlO3"
+    },
+    {
+      "formula": "HoAlO3"
+    },
+    {
+      "formula": "LaGaO3"
+    },
+    {
+      "formula": "YGaO3"
+    },
+    {
+      "formula": "NdGaO3"
+    },
+    {
+      "formula": "PrGaO3"
+    },
+    {
+      "formula": "SmGaO3"
+    },
+    {
+      "formula": "GdGaO3"
+    },
+    {
+      "formula": "DyGaO3"
+    },
+    {
+      "formula": "HoGaO3"
+    },
+    {
+      "formula": "LaInO3"
+    },
+    {
+      "formula": "YInO3"
+    },
+    {
+      "formula": "NdInO3"
+    },
+    {
+      "formula": "PrInO3"
+    },
+    {
+      "formula": "SmInO3"
+    },
+    {
+      "formula": "GdInO3"
+    },
+    {
+      "formula": "DyInO3"
+    },
+    {
+      "formula": "HoInO3"
+    },
+    {
+      "formula": "LaScO3"
+    },
+    {
+      "formula": "YScO3"
+    },
+    {
+      "formula": "NdScO3"
+    },
+    {
+      "formula": "PrScO3"
+    },
+    {
+      "formula": "SmScO3"
+    },
+    {
+      "formula": "GdScO3"
+    },
+    {
+      "formula": "DyScO3"
+    },
+    {
+      "formula": "HoScO3"
+    }
+  ]
+}
