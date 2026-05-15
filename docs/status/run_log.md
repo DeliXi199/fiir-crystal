@@ -4,6 +4,54 @@ This file records durable, high-signal workflow results for future agents. Keep
 entries concise and point to generated artifacts instead of duplicating large
 outputs.
 
+## 2026-05-14: Execute Alex-20 F4 StructureMatcher Audit
+
+- Added an external worker:
+  `experiments/run_f4_structure_matcher_audit.py`.
+  It lives outside the `fiir_crystal` core package, reads local task/reference
+  artifacts, runs local pymatgen `StructureMatcher`, and writes `f4-audit-v1`
+  JSONL rows.
+- Smoke checks:
+  - 8-row smoke wrote
+    `outputs/f4_novelty_audit/reference_pool_v1/f4_results_smoke.jsonl`.
+  - 40-row smoke wrote
+    `outputs/f4_novelty_audit/reference_pool_v1/f4_results_smoke40.jsonl`,
+    covered the same-formula reference path, and imported with 40 matched rows,
+    984 missing rows, and 0 orphans.
+- Full command intent:
+  run the external StructureMatcher worker over
+  `outputs/f4_novelty_audit/reference_pool_v1/f4_audit_tasks.jsonl` using
+  `outputs/f4_novelty_audit/reference_pool_v1/reference_pool_manifest.json`.
+- Full outputs:
+  - `outputs/f4_novelty_audit/reference_pool_v1/f4_results.jsonl`
+  - `outputs/f4_novelty_audit/reference_pool_v1/f4_structure_matcher_audit_summary.json`
+  - `outputs/f4_novelty_audit/reference_pool_v1/f4_structure_matcher_audit_report.md`
+- Full worker result:
+  - 1024 task rows, 1024 result rows.
+  - Exact-formula Alex-20 bucket policy.
+  - 186 selected same-formula references from the 1,339,618-row Alex-20 pool.
+  - 768 candidates had an exact-formula bucket but no StructureMatcher match.
+  - 256 candidates had no exact-formula reference bucket.
+  - 0 high-leakage StructureMatcher matches.
+  - 0 reference parse failures and 0 candidate parse failures.
+- Post-result readiness:
+  `python scripts/check_f4_novelty_audit_ready.py --plan-json outputs/f4_novelty_audit/reference_pool_v1/f4_audit_plan.json --output-json outputs/f4_novelty_audit/reference_pool_v1/readiness_summary_with_results.json --require-results`
+  reported ready true with 1024 result rows.
+- Import:
+  `python scripts/import_f4_novelty_audit.py --candidate-index outputs/mlip_validation_three_mlip_1024_20260513_batch/candidate_index.jsonl --f4-results-jsonl outputs/f4_novelty_audit/reference_pool_v1/f4_results.jsonl --output-dir outputs/f4_novelty_import_1024_20260514 --fail-on-orphans --fail-on-missing`
+  completed with 1024 candidates, 1024 F4 records, 1024 matched, 0 missing, 0
+  orphans, and 0 high-leakage candidates.
+- Import outputs:
+  - `outputs/f4_novelty_import_1024_20260514/candidates_with_f4.jsonl`
+  - `outputs/f4_novelty_import_1024_20260514/f4_import_summary.json`
+  - `outputs/f4_novelty_import_1024_20260514/f4_import_report.md`
+- Verification:
+  - `python -m py_compile experiments/run_f4_structure_matcher_audit.py`
+  - `pytest -q tests/test_f4_novelty_import.py tests/test_f4_novelty_audit_plan.py tests/test_f4_reference_pool_manifest.py`
+- Caveat: this is Alex-20-only, exact-formula, binary StructureMatcher leakage
+  evidence. It is not an all-known-materials novelty claim because Materials
+  Project, GNoME, and ICSD are not staged in `reference_pool_v1`.
+
 ## 2026-05-14: F4 Novelty/Leakage Audit Boundary
 
 - Added a local-only F4 novelty/leakage audit boundary. The FIIR core now plans
@@ -1861,3 +1909,1129 @@ Caveat:
   validation evidence exists yet. Strict three-MLIP labels remain MLIP
   relaxation proxy evidence, not DFT evidence and not self-consistent
   hull-confirmed stability.
+
+## 2026-05-14: Complete 64x20 Generation And Fix Matched QA Namespace
+
+Intent:
+
+- Record that the four matched 64-formula x 20-sample before/after generation
+  jobs completed cleanly.
+- Fix local QA/collection so matched before/after roots can be scanned together
+  without treating reused CrystalFormer candidate ids as cross-root duplicates.
+- Prepare the project for matched MACE+CHGNet+MatGL relaxation validation.
+
+Completed generation jobs:
+
+| side | shard | job | node | completed | candidates | DPO eligible | generated pairs |
+| --- | --- | ---: | --- | --- | ---: | ---: | ---: |
+| before | 001 | 101278 | gpu40902 | 2026-05-14 02:32:59 CST | 640 | 640 | 392 |
+| before | 002 | 101279 | gpuh2001 | 2026-05-14 04:13:48 CST | 640 | 640 | 424 |
+| after | 001 | 101280 | gpuh2001 | 2026-05-14 04:03:52 CST | 640 | 640 | 337 |
+| after | 002 | 101281 | gpuh2001 | 2026-05-14 04:08:51 CST | 640 | 640 | 466 |
+
+Generation summary:
+
+- all four logs contain `CrystalFormer bulk generation orchestration complete`.
+- all four stderr files are empty.
+- aggregate totals: 128/128 formulas completed, 2560 candidates, 2560
+  DPO-eligible candidates, and 1619 generated geometry/chemistry preference
+  pairs.
+- before totals: 64 formulas, 1280 candidates, 1280 DPO eligible, 816 generated
+  preference pairs, 40 F1 failures, 0 F2 failures, and 1280 F3-unknown
+  candidates.
+- after totals: 64 formulas, 1280 candidates, 1280 DPO eligible, 803 generated
+  preference pairs, 37 F1 failures, 0 F2 failures, and 1280 F3-unknown
+  candidates.
+
+Implementation:
+
+- Updated `fiir_crystal/artifact_qa.py` so candidate lookup and duplicate
+  checks are scoped by input root.
+- Updated `fiir_crystal/collection.py` so candidate and preference-pair counts
+  are root-scoped before formula-level aggregation.
+- Added regression coverage in `tests/test_crystalformer_artifact_qa.py` and
+  `tests/test_crystalformer_bulk_collection.py`.
+
+Validation:
+
+- `pytest -q tests/test_crystalformer_artifact_qa.py tests/test_crystalformer_bulk_collection.py`
+  passed.
+- Combined 64x20 QA now reports `ready: true`, `critical_count: 0`, with 136
+  documented warnings from empty/zero-pair artifacts.
+- Combined 64x20 collection now reports 64 formulas, 2560 candidates, 2560
+  audit candidates, 2560 DPO eligible, and 1619 preference pairs.
+
+Next gate:
+
+- Build prefixed before/after MLIP validation batches from the four 64x20
+  roots.
+- Submit matched MACE+CHGNet+MatGL relaxation jobs through existing SLURM
+  wrappers only; do not run MLIP validation on the login node.
+- Build strict three-MLIP consensus artifacts and compare before/after only
+  after all six normalized validator outputs exist.
+
+Caveat:
+
+- This is still generation evidence only. F3/stability is unknown for all
+  64x20 candidates until matched MLIP relaxation consensus validation is run
+  and imported. The downstream labels remain MLIP relaxation proxy evidence,
+  not DFT evidence and not self-consistent hull-confirmed stability.
+
+## 2026-05-14: Submit 64x20 Matched Three-MLIP Offline Validation
+
+Intent:
+
+- Prepare root-scoped before/after validation batches for the completed 64x20
+  generation gate.
+- Submit matched MACE, CHGNet, and MatGL relaxation validation jobs through the
+  project SLURM wrappers only.
+- Keep all downstream claims blocked until normalized validator outputs and
+  strict three-MLIP consensus artifacts exist.
+
+Prepared batches:
+
+- before:
+  `outputs/mlip_validation_dpo_strict3mlip_1024_before_after_64x20_20260514_batch/before/`
+  with 1240 selected candidates across 64 formulas, prefix `before64__`, and
+  40 F1/F2-gated candidates skipped.
+- after:
+  `outputs/mlip_validation_dpo_strict3mlip_1024_before_after_64x20_20260514_batch/after/`
+  with 1243 selected candidates across 64 formulas, prefix `after64__`, and
+  37 F1/F2-gated candidates skipped.
+- persistent combined QA:
+  `outputs/dpo_strict3mlip_1024_before_after/qa_64x20_seed20260513/`
+- persistent combined collection:
+  `outputs/dpo_strict3mlip_1024_before_after/collection_64x20_seed20260513/`
+
+Submission artifacts:
+
+- runbook:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_64x20_seed20260513/README.md`
+- prepared manifest:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_64x20_seed20260513/run_manifest_prepared.json`
+- submitted manifest:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_64x20_seed20260513/run_manifest_submitted.json`
+- submission script:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_64x20_seed20260513/submit_validation_jobs.sh`
+
+Submitted jobs:
+
+| validator | side | job | startup state | node | output directory |
+| --- | --- | ---: | --- | --- | --- |
+| MACE | before | 101697 | RUNNING | gpuh2001 | `outputs/mlip_validation_mace_relax_dpo_strict3mlip_1024_64x20_before_20260514` |
+| MACE | after | 101698 | PENDING |  | `outputs/mlip_validation_mace_relax_dpo_strict3mlip_1024_64x20_after_20260514` |
+| CHGNet | before | 101699 | PENDING |  | `outputs/mlip_validation_chgnet_relax_dpo_strict3mlip_1024_64x20_before_20260514` |
+| CHGNet | after | 101700 | PENDING |  | `outputs/mlip_validation_chgnet_relax_dpo_strict3mlip_1024_64x20_after_20260514` |
+| MatGL | before | 101701 | PENDING |  | `outputs/mlip_validation_matgl_relax_dpo_strict3mlip_1024_64x20_before_20260514` |
+| MatGL | after | 101702 | RUNNING | gpuh2002 | `outputs/mlip_validation_matgl_relax_dpo_strict3mlip_1024_64x20_after_20260514` |
+
+Scheduler shape:
+
+- candidate partitions: `h200,h20,h20llm,gpu4090_8,gpu4090_128`
+- time limit: `02:00:00`
+- each submitted job requested `gpu:8`; the pinned plans selected H200 nodes
+  where available.
+- MACE jobs used precision profile `fp64`; CHGNet and MatGL jobs used `tf32`.
+- MatGL used the local model path under
+  `outputs/mlip_models/matgl/M3GNet-PES-MatPES-PBE-2025.2/`.
+
+Startup check:
+
+- `scripts/slurm/monitor_slurm_startup.sh --job-id 101697 --seconds 300`
+  saw job `101697` running on `gpuh2001` with CUDA devices `0,1,2,3,4,5,6,7`.
+- The monitor exited nonzero because stderr was non-empty. The stderr content
+  was MACE/e3nn `torch.load` UserWarning messages, not a traceback.
+- Job `101702` was also running on `gpuh2002`; checked MatGL stderr contained
+  MatGL/PyTorch warnings only. A grep over checked MACE/MatGL log tails found
+  no `Traceback`, `Exception`, `Error`, `not gpu`, or CPU-only marker.
+
+Next gate:
+
+- Refresh SLURM status until all six jobs complete.
+- Run readiness checks for 1240 before rows and 1243 after rows.
+- Build before/after strict three-MLIP consensus artifacts.
+- Run the matched 64x20 before/after comparison.
+
+Caveat:
+
+- This is submission/startup evidence only. F3/stability remains unknown until
+  all six validators complete and consensus is imported. Labels remain MLIP
+  relaxation proxy evidence, not DFT evidence and not self-consistent
+  hull-confirmed stability.
+
+## 2026-05-14: Add Batch-Aware GPU Reserved-Node Planning
+
+Intent:
+
+- Prevent multiple jobs submitted in the same batch from repeatedly pinning to
+  the same node snapshot before SLURM has reflected the earlier submissions.
+- Preserve immediate pinned placement for the first jobs that can truly start
+  now, then let excess jobs fall back to flexible multi-partition queueing.
+
+Changes:
+
+- Added `reserved_nodes` to `GpuSchedulingConfig` and the GPU plan JSON.
+- Added `--reserved-node` to both GPU planner CLIs:
+  `scripts/slurm/plan_slurm_job.py --kind gpu` and
+  `scripts/slurm/plan_gpu_job.py`.
+- Updated `scripts/slurm/submit_crystalformer_bulk_gpu.sh` with optional
+  `FIIR_GPU_RESERVED_NODES` and `FIIR_GPU_RESERVED_NODES_FILE` inputs.
+  When the file is set, the wrapper reads previously selected pinned nodes
+  before planning and appends the newly selected pinned node after successful
+  submission.
+- Updated the 64x20 MLIP submission script to create and pass a per-batch
+  reserved-node file for future reruns:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_64x20_seed20260513/submit_validation_jobs.sh`.
+- Documented the behavior in `scripts/slurm/README.md` and
+  `docs/status/current_project_state.md`.
+
+Verification:
+
+- `bash -n scripts/slurm/submit_crystalformer_bulk_gpu.sh`
+- `bash -n outputs/dpo_strict3mlip_1024_before_after/offline_validation_64x20_seed20260513/submit_validation_jobs.sh`
+- `pytest -q tests/test_slurm_gpu_policy.py tests/test_slurm_submission_template.py tests/test_slurm_scheduling.py`
+- `pytest -q`
+
+## 2026-05-14: Complete 64x20 Three-MLIP Offline Validation Comparison
+
+Intent:
+
+- Finish the 64 formulas x 20 samples matched before/after offline-validation
+  gate after all six MLIP relaxation jobs completed.
+- Build strict MACE+CHGNet+MatGL consensus artifacts and compare before/after
+  using imported F3 proxy evidence, not generation-only outputs.
+
+SLURM completion:
+
+| validator | side | job | state | elapsed | node |
+| --- | --- | ---: | --- | ---: | --- |
+| MACE | before | 101697 | `COMPLETED`, exit `0:0` | `00:06:46` | `gpuh2001` |
+| MACE | after | 101698 | `COMPLETED`, exit `0:0` | `00:05:57` | `gpuh2001` |
+| CHGNet | before | 101699 | `COMPLETED`, exit `0:0` | `00:06:30` | `gpuh2001` |
+| CHGNet | after | 101700 | `COMPLETED`, exit `0:0` | `00:05:28` | `gpuh2001` |
+| MatGL | before | 101701 | `COMPLETED`, exit `0:0` | `00:06:14` | `gpuh2001` |
+| MatGL | after | 101702 | `COMPLETED`, exit `0:0` | `00:07:37` | `gpuh2002` |
+
+Readiness:
+
+- before readiness:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_64x20_seed20260513/readiness_before_summary.json`
+  with MACE/CHGNet/MatGL each at 1240 rows.
+- after readiness:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_64x20_seed20260513/readiness_after_summary.json`
+  with MACE/CHGNet/MatGL each at 1243 rows.
+- readiness result: true for both sides.
+
+Consensus outputs:
+
+- before consensus:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_dpo_strict3mlip_1024_64x20_before_20260514/`
+- after consensus:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_dpo_strict3mlip_1024_64x20_after_20260514/`
+- before consensus summary: overlap 1240, F3 available 807, stable consensus
+  456, unstable consensus 351, disagreement 433, all-three agreement rate
+  0.650806.
+- after consensus summary: overlap 1243, F3 available 805, stable consensus
+  456, unstable consensus 349, disagreement 438, all-three agreement rate
+  0.647627.
+
+Final comparison:
+
+- generation sanity summary:
+  `outputs/dpo_strict3mlip_1024_before_after/comparison_64x20_seed20260513/summary.json`
+- comparison summary:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_comparison_64x20_seed20260513/summary.json`
+- comparison report:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_comparison_64x20_seed20260513/report.md`
+- final manifest:
+  `outputs/dpo_strict3mlip_1024_before_after/offline_validation_64x20_seed20260513/run_manifest_final.json`
+
+Matched before/after metrics:
+
+| metric | before | after | delta |
+| --- | ---: | ---: | ---: |
+| candidates | 1280 | 1280 | 0 |
+| DPO eligible | 1280 | 1280 | 0 |
+| F1 fail rate | 0.03125 | 0.02890625 | -0.00234375 |
+| F2 fail rate | 0.0 | 0.0 | 0.0 |
+| F3 available | 807 | 805 | -2 |
+| strict stable consensus | 456 | 456 | 0 |
+| unstable consensus | 351 | 349 | -2 |
+| disagreement | 433 | 438 | +5 |
+| all-three agreement rate | 0.650806 | 0.647627 | -0.00318 |
+| stable consensus rate | 0.35625 | 0.35625 | 0.0 |
+| preference-pair yield | 816 | 803 | -13 |
+| unique sequence fraction | 0.96875 | 0.971094 | +0.00234 |
+| spacegroup count | 75 | 75 | 0 |
+| spacegroup entropy | 3.91662 | 3.91351 | -0.00312 |
+
+Interpretation:
+
+- The 64x20 matched proxy audit does not show a strict three-MLIP stable-rate
+  improvement for the DPO after checkpoint.
+- The proxy-divergence screen is flagged because stable consensus rate did not
+  improve; this is a conservative stop signal against making a DPO-improvement
+  claim from this checkpoint.
+- The labels remain MACE+CHGNet+MatGL relaxation consensus proxy evidence, not
+  DFT evidence and not self-consistent hull-confirmed stability.
+
+Verification:
+
+- `pytest -q tests/test_compare_dpo_before_after_mlip_consensus.py`
+- `python -m py_compile scripts/compare_dpo_before_after_mlip_consensus.py scripts/build_mlip_ensemble_consensus.py scripts/check_dpo_offline_validation_ready.py`
+- `pytest -q`
+
+## 2026-05-14: Diagnose 64x20 DPO After Checkpoint Non-Improvement
+
+Intent:
+
+- Explain why the 64x20 after checkpoint did not improve strict three-MLIP
+  stable consensus rate.
+- Split the global before/after result by formula across preference-pair yield,
+  F1/F2 filtering, F3 consensus availability, stable/unstable consensus, and
+  validator disagreement.
+
+Outputs:
+
+- diagnosis summary:
+  `outputs/dpo_strict3mlip_1024_before_after/diagnostics_64x20_seed20260513/summary.json`
+- formula deltas:
+  `outputs/dpo_strict3mlip_1024_before_after/diagnostics_64x20_seed20260513/formula_deltas.jsonl`
+- report:
+  `outputs/dpo_strict3mlip_1024_before_after/diagnostics_64x20_seed20260513/report.md`
+
+Global delta:
+
+| signal | delta |
+| --- | ---: |
+| stable consensus count | 0 |
+| F3 available count | -2 |
+| disagreement count | +5 |
+| preference-pair count | -13 |
+| F1 fail count | -3 |
+
+Main contributors:
+
+- largest stable-consensus losses: CaThO3 -3, PbZrO3 -3, SrCeO3 -3,
+  BaSnO3 -2, CaCeO3 -2, CaTiO3 -2, DyScO3 -2, GdInO3 -2.
+- largest stable-consensus gains: BaHfO3 +4, HoScO3 +3, SmGaO3 +3,
+  BaZrO3 +2, CaZrO3 +2, DyInO3 +2, PrInO3 +2, SmScO3 +2.
+- largest F3-available losses: LaScO3 -4, CaThO3 -3, PbThO3 -3,
+  SrCeO3 -3, CaCeO3 -2, CaTiO3 -2, DyScO3 -2, GdAlO3 -2.
+- largest disagreement increases: LaScO3 +4, CaThO3 +3, CaTiO3 +3,
+  SrCeO3 +3, CaCeO3 +2, CaSiO3 +2, DyAlO3 +2, DyScO3 +2.
+- largest preference-pair losses: BaSnO3 -19, BaThO3 -19, BaZrO3 -19,
+  PbGeO3 -19, PrGaO3 -19, SrThO3 -19, CaTiO3 -18, CaZrO3 -18.
+
+Interpretation:
+
+- The flat global stable count is not a uniform null result; formula-level
+  stable gains are offset by formula-level losses.
+- The after checkpoint slightly reduced F3-available consensus rows and raised
+  validator disagreement, so the proxy screen remains conservative.
+- The unchanged next-step recommendation is to avoid claiming improvement for
+  this DPO checkpoint. Before retraining, build a revised DPO preference
+  artifact emphasizing high-agreement stable-vs-unstable MLIP consensus pairs
+  and reducing zero/low-margin geometry-only pair sources.
+
+Verification:
+
+- `python -m json.tool outputs/dpo_strict3mlip_1024_before_after/diagnostics_64x20_seed20260513/summary.json`
+- `wc -l outputs/dpo_strict3mlip_1024_before_after/diagnostics_64x20_seed20260513/formula_deltas.jsonl` reported 64 rows.
+
+## 2026-05-14: Build F3-Isolated DPO Preference Artifact
+
+Intent:
+
+- Remove aggregate-FIIR-score confounding from the next DPO data artifact.
+- Emit only same-formula stable-vs-unstable pairs where both sides pass F1/F2
+  and the three MLIP validators all agree on the F3 proxy label.
+- Use the after-checkpoint 64x20 candidate distribution as the follow-up
+  training source; do not pair before and after candidates together.
+
+Implementation:
+
+- Added `scripts/build_f3_isolated_dpo_preferences.py`.
+- Added `tests/test_build_f3_isolated_dpo_preferences.py`.
+- The script joins prefixed consensus candidate ids such as
+  `after64__crystalformer_output_...` back to raw audit candidates, strips only
+  for lookup, and writes prefixed ids into the DPO artifact to preserve
+  provenance and avoid collisions.
+- Each pair has:
+  - `preference_type: stability_aware_offline_validation`
+  - `preference_reason: [f3_consensus_only, three_mlip_all_agree, f1_f2_controlled]`
+  - `chosen_score: 0.0`, `rejected_score: 1.0`
+  - chosen `f3_stability: 0.0`, rejected `f3_stability: 1.0`
+  - metadata flag `f3_only_preference: true`
+
+Outputs:
+
+- F3-only preference artifact:
+  `outputs/dpo_preferences/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514/dpo_preferences/preference_pairs.jsonl`
+- preference summary:
+  `outputs/dpo_preferences/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514/dpo_preferences/preference_summary.json`
+- matched F3 candidate index:
+  `outputs/dpo_preferences/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514/matched_f3_candidates.jsonl`
+- training-boundary manifest:
+  `outputs/dpo_preferences/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514/training_boundary/trainer_manifest.json`
+
+Counts:
+
+| signal | count |
+| --- | ---: |
+| consensus input rows | 1243 |
+| retained F3 candidates after F1/F2 control | 801 |
+| retained stable candidates | 456 |
+| retained unstable candidates | 345 |
+| skipped non-agreement or missing F3 | 438 |
+| skipped F1/F2 not passing | 4 |
+| emitted preference pairs | 2156 |
+| valid training pairs | 2156 |
+| invalid training pairs | 0 |
+
+Training boundary:
+
+- ready for external training: true.
+- blocking reasons: none.
+- warning: CrystalFormer is a normal clone; fork/submodule is recommended for
+  future training work.
+- FIIR still does not train DPO internally; this is an external CrystalFormer
+  handoff artifact only.
+
+Verification:
+
+- `pytest -q tests/test_build_f3_isolated_dpo_preferences.py tests/test_crystalformer_dpo_training_boundary.py`
+- `pytest -q`
+
+## 2026-05-14: Run F3-Isolated DPO Follow-Up And 64x20 Proxy Audit
+
+Intent:
+
+- Execute the next step after building the F3-isolated DPO preference artifact.
+- Train one external CrystalFormer DPO epoch from the previous DPO-after
+  checkpoint using only F3-isolated stable-vs-unstable pairs with F1/F2
+  controlled.
+- Generate a matched 64 formulas x 20 samples follow-up from the new checkpoint
+  and compare it to the previous DPO-after checkpoint under the same
+  MACE+CHGNet+MatGL relaxation consensus proxy gate.
+
+Training:
+
+- prepared package:
+  `outputs/crystalformer_dpo_runs/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514_smoke_prepare/`
+- input pairs: 2156
+- start epoch: 46001
+- target epoch: 46002
+- SLURM job: `101758`, `fiir-f3only-dpo`, `COMPLETED`, exit `0:0`,
+  elapsed `00:04:09`, node `gpuh2001`, requested `gpu:8`
+- GPU evidence: `CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7`, JAX backend `gpu`,
+  8 CUDA devices visible.
+- produced checkpoint:
+  `outputs/crystalformer_dpo_runs/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514_smoke_prepare/after_checkpoint/beta_0.1_label_0_gamma_0_adam_bs_32_lr_1e-05_decay_0_clip_1_A_119_W_28_N_21_Nf_5_Kx_16_Kl_4_h0_256_l_16_H_8_k_32_m_256_e_256_drop_0.1/epoch_046002.pkl`
+- checkpoint sha256:
+  `7860e7c79f1fca24d2ac3f57281d91fd6c000c1cf726d20a9a9000b6281367bd`
+- training row: epoch 46002 loss / dpo_loss `405.355835 / 405.355835`,
+  validation loss / validation dpo_loss `474.216217 / 474.216217`.
+
+Follow-up generation:
+
+- configs:
+  `configs/generated/f3_only_mace_chgnet_matgl_consensus_64x20_before_after/after_64x20_seed20260513_shards/`
+- output roots:
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_64x20_before_after/after_64x20_seed20260513_shard_001`
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_64x20_before_after/after_64x20_seed20260513_shard_002`
+- generation jobs:
+  - `101762`, `fiir-f3after-s2`, `COMPLETED`, exit `0:0`, elapsed
+    `00:05:06`, node `gpuh2002`
+  - `101763`, `fiir-f3after-s1flex`, `COMPLETED`, exit `0:0`, elapsed
+    `00:04:57`, node `gpuh2002`
+- scheduling behavior: an initial stale pinned job was cancelled; the rerun used
+  the batch reserved-node strategy. Runnable jobs pinned to free nodes first,
+  while the excess job used flexible queueing and started when `gpuh2002`
+  became free.
+- collection summary:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x20_before_after/collection_after_64x20_seed20260513/collection_summary.json`
+- generation counts: 64/64 formulas completed, 1280 candidates, 1280
+  DPO-eligible candidates, 708 generated geometry/chemistry preference pairs.
+- strict QA note: generation-stage empty/zero-pair artifacts still trigger
+  warnings for formulas with no comparable margins; this is not a blocker for
+  MLIP validation because candidates and audits were complete.
+
+MLIP validation:
+
+- batch:
+  `outputs/mlip_validation_f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514_batch/after/`
+- selected candidates: 1245
+- selected formulas: 64
+- skipped candidates: 35, all `f1_not_pass`
+- validation jobs:
+  - `101767`, `fiir-mace-f3after64`, `COMPLETED`, exit `0:0`, elapsed
+    `00:05:13`, node `gpuh2001`, normalized rows 1245
+  - `101768`, `fiir-chgnet-f3after64`, `COMPLETED`, exit `0:0`, elapsed
+    `00:04:40`, node `gpuh2002`, normalized rows 1245
+  - `101769`, `fiir-matgl-f3after64`, `COMPLETED`, exit `0:0`, elapsed
+    `00:06:27`, node `gpuh2002`, normalized rows 1245
+- validation placement: MACE pinned to free `gpuh2001`, CHGNet pinned to free
+  `gpuh2002`, and MatGL submitted flexible while both nodes were occupied, then
+  started on `gpuh2002` after CHGNet completed.
+- GPU evidence: all three validation jobs requested `gpu:8` and logged
+  `CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7`. A transient MatGL probe saw partial
+  utilization while the job was between worker completions, but the job
+  completed successfully with all 1245 rows normalized.
+- readiness summary:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x20_before_after/offline_validation_after_64x20_seed20260513/readiness_after_summary.json`
+- SLURM provenance:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x20_before_after/offline_validation_after_64x20_seed20260513/slurm_execution_provenance.json`
+- fatal-log scan: no traceback, exception, OOM, killed, failed, or cancelled
+  markers were found in the inspected validation SLURM logs; stderr warnings
+  were library/model warnings.
+
+Consensus and comparison:
+
+- new after consensus:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_f3_only_64x20_after_20260514/`
+- comparison:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x20_before_after/offline_validation_comparison_after64_to_f3after64_seed20260513/`
+
+Matched comparison versus the previous DPO-after checkpoint:
+
+| metric | previous DPO after | F3-only follow-up | delta |
+| --- | ---: | ---: | ---: |
+| candidates | 1280 | 1280 | 0 |
+| F1 fail rate | 0.0289063 | 0.0273438 | -0.0015625 |
+| F2 fail rate | 0 | 0 | 0 |
+| F3 available | 805 | 806 | +1 |
+| strict stable consensus | 456 | 465 | +9 |
+| unstable consensus | 349 | 341 | -8 |
+| disagreement | 438 | 439 | +1 |
+| all-three agreement rate | 0.647627 | 0.647390 | -0.000237 |
+| stable consensus rate | 0.35625 | 0.363281 | +0.00703125 |
+| preference-pair yield | 803 | 708 | -95 |
+| unique sequence fraction | 0.971094 | 0.972656 | +0.0015625 |
+| spacegroup count | 75 | 75 | 0 |
+
+Interpretation:
+
+- The F3-only follow-up is the first 64x20 proxy audit to show a positive
+  strict stable-consensus delta over the previous DPO-after checkpoint (+9).
+- The result is still conservative: all-three agreement decreased very slightly
+  and disagreement increased by one, so the proxy-divergence screen remains
+  flagged.
+- Treat this as a small positive MLIP-proxy signal, not a DFT-backed
+  performance claim. The next gate should be a fixed-candidate audit, larger
+  matched audit, or carefully bounded additional epoch sweep before scaling the
+  training strategy.
+
+## 2026-05-14: Complete F3-Isolated 64x80 Matched Proxy Audit
+
+Intent:
+
+- Scale the F3-isolated follow-up checkpoint audit from 64x20 to 64x80.
+- Compare the previous DPO-after checkpoint epoch 46001 against the F3-only
+  follow-up checkpoint epoch 46002 under the same strict MACE+CHGNet+MatGL
+  relaxation consensus proxy gate.
+
+Generation and collection:
+
+- output root:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/`
+- generation jobs:
+  - `101785`, `fiir-f3x80-b1`, `COMPLETED`, exit `0:0`
+  - `101786`, `fiir-f3x80-b2`, `COMPLETED`, exit `0:0`
+  - `101787`, `fiir-f3x80-a1`, `COMPLETED`, exit `0:0`
+  - `101788`, `fiir-f3x80-a2`, `COMPLETED`, exit `0:0`
+- counts: 5120 before candidates and 5120 after candidates, 64 formulas per
+  side, 80 samples per formula, 5120 DPO-eligible candidates per side.
+- collection summaries:
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/collection_before_64x80_seed20260514/collection_summary.json`
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/collection_after_64x80_seed20260514/collection_summary.json`
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/collection_combined_64x80_seed20260514/collection_summary.json`
+- generation summary for comparison:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/offline_validation_comparison_64x80_seed20260514/generation_summary.json`
+
+MLIP validation:
+
+- batch:
+  `outputs/mlip_validation_f3_only_mace_chgnet_matgl_consensus_64x80_20260514_batch/`
+- selected before candidates: 4999; skipped 121, all `f1_not_pass`.
+- selected after candidates: 4980; skipped 140, all `f1_not_pass`.
+- validation jobs:
+  - `101802`, `fiir-mace-f3x80-b`, `COMPLETED`, exit `0:0`, elapsed
+    `00:29:02`, node `gpuh2002`, normalized rows 4999
+  - `101803`, `fiir-mace-f3x80-a`, `COMPLETED`, exit `0:0`, elapsed
+    `00:18:06`, node `gpu40904`, normalized rows 4980
+  - `101804`, `fiir-chgnet-f3x80-b`, `COMPLETED`, exit `0:0`, elapsed
+    `00:31:48`, node `gpuh2002`, normalized rows 4999
+  - `101805`, `fiir-chgnet-f3x80-a`, `COMPLETED`, exit `0:0`, elapsed
+    `00:17:26`, node `gpu40904`, normalized rows 4980
+  - `101806`, `fiir-matgl-f3x80-b`, `COMPLETED`, exit `0:0`, elapsed
+    `00:20:10`, node `gpu40904`, normalized rows 4999
+  - `101807`, `fiir-matgl-f3x80-a`, `COMPLETED`, exit `0:0`, elapsed
+    `00:30:46`, node `gpuh2002`, normalized rows 4980
+- readiness summaries:
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/offline_validation_64x80_seed20260514/readiness_before_summary.json`
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/offline_validation_64x80_seed20260514/readiness_after_summary.json`
+- fatal-log scan over the six validation SLURM logs found no traceback,
+  exception, OOM, killed, failed, cancelled, CUDA error, or runtime-error
+  markers.
+
+Consensus and comparison:
+
+- before consensus:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_f3_only_64x80_before_20260514/`
+- after consensus:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_f3_only_64x80_after_20260514/`
+- comparison:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/offline_validation_comparison_64x80_seed20260514/`
+- formula-level diagnosis:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/diagnostics_64x80_seed20260514/`
+  with `summary.json`, `formula_deltas.jsonl`, and `report.md`.
+
+Matched comparison versus the previous DPO-after checkpoint:
+
+| metric | previous DPO after | F3-only follow-up | delta |
+| --- | ---: | ---: | ---: |
+| candidates | 5120 | 5120 | 0 |
+| F1 fail rate | 0.0236328 | 0.0273438 | +0.00371094 |
+| F2 fail rate | 0 | 0 | 0 |
+| F3 available | 3208 | 3198 | -10 |
+| strict stable consensus | 1800 | 1882 | +82 |
+| unstable consensus | 1408 | 1316 | -92 |
+| disagreement | 1791 | 1782 | -9 |
+| all-three agreement rate | 0.641728 | 0.642169 | +0.000440 |
+| stable consensus rate | 0.351562 | 0.367578 | +0.016016 |
+| preference-pair yield | 10944 | 12651 | +1707 |
+| unique sequence fraction | 0.976367 | 0.972656 | -0.003711 |
+| spacegroup count | 86 | 86 | 0 |
+| spacegroup entropy | 4.03697 | 4.01794 | -0.01904 |
+
+Interpretation:
+
+- The 64x80 matched proxy audit strengthens the F3-only DPO signal: strict
+  stable consensus increased by 82, all-three agreement increased slightly, and
+  disagreement decreased by 9.
+- The proxy-divergence screen remains flagged because stable consensus rate
+  improved while F1 fail rate increased and diversity signals dipped slightly.
+- Formula-level diagnosis shows the largest stable-consensus gains from
+  GdAlO3 +12, YGaO3 +9, PbZrO3 +8, LaGaO3 +8, and CaCeO3 +8; the largest
+  losses are CaGeO3 -8, PbHfO3 -8, SrCeO3 -8, HoAlO3 -7, and DyScO3 -5.
+  Largest F1-fail increases include PbTiO3 +5 and
+  YAlO3/PrAlO3/NdScO3/DyScO3 +3 each.
+- Treat this as positive MLIP-relaxation proxy evidence, not DFT or
+  hull-confirmed stability. Next step: fixed-candidate audit using the
+  formula-level gain/loss and F1-regression panel before another training-scale
+  escalation.
+
+## 2026-05-14: Run Fixed-Candidate Log-Probability Audit For F3-Isolated Checkpoint
+
+Intent:
+
+- Separate checkpoint likelihood changes from sampling variance after the
+  positive 64x80 matched proxy audit.
+- Score the same compact candidate panel under before checkpoint epoch 46001
+  and after checkpoint epoch 46002.
+- Use formulas from the 64x80 formula diagnosis, covering stable gains, stable
+  losses, F1 regressions, and disagreement regressions.
+
+Implementation:
+
+- Added external CrystalFormer scorer:
+  `experiments/run_crystalformer_fixed_candidate_logp_audit.py`.
+- The scorer runs outside the FIIR core package, imports CrystalFormer/JAX only
+  in `main`, uses checkpoint-local CrystalFormer parameters, and writes local
+  JSONL/JSON/Markdown artifacts. It does not run generation, MLIP validation,
+  DFT, training, downloads, or external APIs.
+- Built fixed panel:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/fixed_candidate_logp_audit_64x80_seed20260514/`
+  with `manifest.json`, `panel_sequences.jsonl`, `report.md`, and
+  `run_fixed_candidate_logp_audit.sh`.
+- Panel size: 861 candidates.
+- Panel formulas:
+  BaSiO3, CaCeO3, CaGeO3, DyAlO3, DyScO3, GdAlO3, HoAlO3, LaGaO3, NdScO3,
+  PbCeO3, PbHfO3, PbTiO3, PbZrO3, PrAlO3, SrCeO3, SrZrO3, YAlO3, YGaO3.
+
+SLURM execution:
+
+- job: `102594`, `fiir-f3x80-logp-audit`
+- partition/node: `test` / `test001`
+- state: `COMPLETED`, exit `0:0`
+- elapsed: `00:01:25`
+- requested GPUs: `gpu:rtx4090:2`
+- JAX preflight: `jax_default_backend=gpu`, devices
+  `[CudaDevice(id=0), CudaDevice(id=1)]`
+- logs:
+  - `logs/slurm/fiir-f3x80-logp-audit_102594.log`
+  - `logs/slurm/fiir-f3x80-logp-audit_102594.err`
+- stderr contained XLA autotuning warnings only in the inspected tail.
+
+Outputs:
+
+- score directory:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/fixed_candidate_logp_audit_64x80_seed20260514/logp_scores/`
+- score rows:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/fixed_candidate_logp_audit_64x80_seed20260514/logp_scores/logp_rows.jsonl`
+  with 1722 rows.
+- summary:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/fixed_candidate_logp_audit_64x80_seed20260514/logp_scores/summary.json`
+- report:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/fixed_candidate_logp_audit_64x80_seed20260514/logp_scores/report.md`
+
+After-minus-before log-probability deltas by consensus label:
+
+| label | count | mean delta | median delta |
+| --- | ---: | ---: | ---: |
+| disagreement | 288 | -179172 | -22306.5 |
+| stable | 288 | 151988 | 39.6328 |
+| unstable | 285 | -420331 | -78235.5 |
+
+After-minus-before log-probability deltas by panel reason:
+
+| reason | count | mean delta | median delta |
+| --- | ---: | ---: | ---: |
+| disagreement_regression | 192 | -122100 | -63.058 |
+| f1_regression | 192 | -155121 | -128.745 |
+| stable_gain | 237 | -173510 | -1826.12 |
+| stable_loss | 144 | -93715.5 | -19841.8 |
+| stable_loss+disagreement_regression | 48 | -477315 | -104099 |
+| stable_loss+f1_regression | 48 | 65232.3 | -39.4123 |
+
+Interpretation:
+
+- The fixed panel supports the same direction as the 64x80 matched proxy audit:
+  checkpoint 46002 raises likelihood for stable consensus candidates relative
+  to unstable candidates.
+- The stable-minus-unstable delta gap is positive at `+572318.5687`.
+- The signal is mostly relative suppression of unstable/disagreement candidates
+  plus a small stable median increase, not a broad unconditional likelihood
+  increase across every formula panel.
+- This is a model-likelihood audit, not generation, MLIP validation, DFT, or
+  hull-confirmed stability. The next GPU step should remain a bounded epoch
+  sweep or targeted validation, with the fixed panel re-used as a cheap guard
+  before any larger generation+MLIP campaign.
+
+## 2026-05-14: Run Bounded Epoch 46003 Continuation And Fixed-Panel Guard
+
+Intent:
+
+- Take only one additional external CrystalFormer DPO epoch after checkpoint
+  46002.
+- Avoid a broad training-scale escalation; use the same F3-isolated 2156-pair
+  preference artifact and immediately re-score the existing 861-candidate fixed
+  panel.
+- Decide whether another generation+MLIP validation gate is worth running.
+
+Preparation:
+
+- package:
+  `outputs/crystalformer_dpo_runs/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514_epoch46003_prepare/`
+- preference pairs:
+  `outputs/dpo_preferences/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514/dpo_preferences/preference_pairs.jsonl`
+- base checkpoint:
+  `outputs/crystalformer_dpo_runs/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514_smoke_prepare/after_checkpoint/beta_0.1_label_0_gamma_0_adam_bs_32_lr_1e-05_decay_0_clip_1_A_119_W_28_N_21_Nf_5_Kx_16_Kl_4_h0_256_l_16_H_8_k_32_m_256_e_256_drop_0.1`
+- prepared pairs: 2156
+- checkpoint start epoch: 46002
+- checkpoint target epoch: 46003
+- run script:
+  `outputs/crystalformer_dpo_runs/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514_epoch46003_prepare/run_training.sh`
+
+DPO continuation execution:
+
+- job: `102595`, `fiir-f3only-ep46003`
+- partition/node: `test` / `test001`
+- state: `COMPLETED`, exit `0:0`
+- elapsed: `00:02:47`
+- requested GPUs: `gpu:rtx4090:2`
+- JAX preflight: `jax_default_backend=gpu`, devices
+  `[CudaDevice(id=0), CudaDevice(id=1)]`
+- produced checkpoint:
+  `outputs/crystalformer_dpo_runs/f3_only_mace_chgnet_matgl_consensus_64x20_after_20260514_epoch46003_prepare/after_checkpoint/beta_0.1_label_0_gamma_0_adam_bs_32_lr_1e-05_decay_0_clip_1_A_119_W_28_N_21_Nf_5_Kx_16_Kl_4_h0_256_l_16_H_8_k_32_m_256_e_256_drop_0.1/epoch_046003.pkl`
+- checkpoint sha256:
+  `f6d26488bd95602f1ab72369aa1dc0e1e14bb5a08ba7feb2c28adc570b19f065`
+- data row:
+  - epoch: 46003
+  - loss / dpo_loss: `447.105591 / 447.105591`
+  - chosen / rejected logp: `-239462.250000 / -1685722.000000`
+  - validation loss / validation dpo_loss: `222.710953 / 222.710953`
+  - validation chosen / rejected logp: `-178254.906250 / -2148126.500000`
+- fatal-log scan found no traceback, exception, OOM, killed, failed,
+  cancelled, CUDA error, runtime-error, or `Error` markers. Stderr contained
+  XLA autotuning warnings only.
+
+Fixed-panel guard:
+
+- added run script:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/fixed_candidate_logp_audit_64x80_seed20260514/run_fixed_candidate_logp_audit_epoch46003_vs_46002.sh`
+- job: `102598`, `fiir-f3ep3-logp-audit`
+- partition/node: `test` / `test001`
+- state: `COMPLETED`, exit `0:0`
+- elapsed: `00:00:38`
+- requested GPUs: `gpu:rtx4090:2`
+- output directory:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_64x80_before_after/fixed_candidate_logp_audit_64x80_seed20260514/logp_scores_epoch46003_vs_46002/`
+- score rows: 1722, covering 861 candidates under checkpoints 46002 and 46003.
+
+46003 minus 46002 log-probability deltas by consensus label:
+
+| label | count | mean delta | median delta |
+| --- | ---: | ---: | ---: |
+| disagreement | 288 | -184637 | -24775.6 |
+| stable | 288 | 109245 | 25.0478 |
+| unstable | 285 | -451094 | -84341.2 |
+
+46003 minus 46002 log-probability deltas by panel reason:
+
+| reason | count | mean delta | median delta |
+| --- | ---: | ---: | ---: |
+| disagreement_regression | 192 | -134993 | -126.582 |
+| f1_regression | 192 | -176590 | -136.837 |
+| stable_gain | 237 | -262995 | -185.5 |
+| stable_loss | 144 | -99307.5 | -20720.7 |
+| stable_loss+disagreement_regression | 48 | -397617 | -86203.9 |
+| stable_loss+f1_regression | 48 | 109680 | -46.3985 |
+
+Additional fixed-panel aggregation:
+
+- 46003-vs-46002 stable-minus-unstable mean delta gap: `+560338.35`.
+- Cumulative 46003-vs-46001 median deltas from the two fixed-panel audits:
+  stable `+93.17`, unstable `-173380.06`, disagreement `-66843.56`.
+- Cumulative 46003-vs-46001 stable-minus-unstable mean delta gap:
+  `+1132656.92`.
+
+Interpretation:
+
+- The second epoch did not reverse the fixed-candidate likelihood signal.
+- It continues to prefer stable consensus candidates relative to unstable
+  candidates, but most of the effect is still relative suppression of
+  unstable/disagreement candidates rather than large broad stable uplift.
+- Do not run another DPO epoch yet. The next evidence gate should be matched
+  generation+MLIP validation for checkpoint 46003, starting at 64x20 or 64x40
+  before deciding whether 46003 is better than checkpoint 46002 in generated
+  outputs.
+
+## 2026-05-14: Make GPU `test` Partition A Short-Job Fallback Only
+
+Intent:
+
+- Prevent the GPU planner from selecting `test` simply because it is idle.
+- Keep `test` available only for small bounded GPU jobs when no normal GPU node
+  can start immediately.
+- Preserve explicit test-only usage for deliberate short test jobs.
+
+Implementation:
+
+- Updated `fiir_crystal/slurm_gpu_policy.py` so pinned GPU selection first ranks
+  eligible non-`test` nodes only. `test` is considered only if that non-`test`
+  pool is empty and the existing 30-minute time guard passes.
+- Updated flexible GPU queue partition selection so `test` is excluded whenever
+  any normal GPU partition is queueable. `test` remains available when it is
+  the only allowed/queueable partition and the job is short enough.
+- Updated planner/submitter summary text:
+  - `scripts/slurm/plan_slurm_job.py`
+  - `scripts/slurm/plan_gpu_job.py`
+  - `scripts/slurm/submit_crystalformer_bulk_gpu.sh`
+- Updated docs:
+  - `scripts/slurm/README.md`
+  - `docs/status/current_project_state.md`
+- Added tests covering:
+  - `test` loses to a normal GPU node even when `test` has a higher raw GPU
+    score.
+  - `test` is used for a short job when no non-`test` GPU node is free.
+  - flexible GPU queueing excludes `test` when a normal GPU partition is
+    queueable.
+
+Policy summary:
+
+- Normal GPU nodes always win when they can start the job now.
+- `test` requires an explicit time limit of 30 minutes or less.
+- `test` is only a fallback after no non-`test` GPU node has enough free
+  GPUs/CPUs to start now.
+- Explicit `FIIR_GPU_PARTITIONS=test` remains the opt-in path for deliberate
+  short test-only jobs.
+
+Verification:
+
+- `python -m py_compile fiir_crystal/slurm_gpu_policy.py scripts/slurm/plan_slurm_job.py scripts/slurm/plan_gpu_job.py`
+- `pytest -q tests/test_slurm_gpu_policy.py`
+- `pytest -q tests/test_slurm_submission_template.py tests/test_slurm_gpu_policy.py`
+
+## 2026-05-14: Switch GPU Submissions From Node-Pinned To Partition-Wide
+
+Trigger:
+
+- During the epoch 46003 matched 64x20 generation gate, job `102599`
+  remained pending on `gpu40903` even after `gpu40904` was idle.
+- Root cause: the old auto plan emitted `--nodelist gpu40903`, so SLURM could
+  not move the pending job to another free node in `gpu4090_128`.
+- Desired policy: GPU availability should be determined by free GPU count, not
+  idle CPU or free-memory counts; submissions should fix the partition, not a
+  single node.
+
+Implementation:
+
+- Updated `fiir_crystal/slurm_gpu_policy.py`:
+  - `node_is_eligible` now uses free GPU count for start-now GPU eligibility
+    and no longer rejects nodes because idle CPU or free memory is low.
+  - Auto selected plans now submit partition-wide with `--partition` and
+    `--gres`, intentionally omitting `--nodelist`.
+  - CPU and memory are request-shape knobs (`FIIR_GPU_QUEUE_MIN_CPUS=32`,
+    `FIIR_GPU_QUEUE_MEMORY_MB=256000` by default), not GPU availability
+    filters.
+  - The plan records the selected node as a reference node for partition/GRES
+    choice, while `FIIR_GPU_NODE=slurm_assigned_at_runtime`.
+- Updated:
+  - `scripts/slurm/submit_crystalformer_bulk_gpu.sh`
+  - `scripts/slurm/plan_slurm_job.py`
+  - `scripts/slurm/plan_gpu_job.py`
+  - `scripts/slurm/README.md`
+  - `tests/test_slurm_gpu_policy.py`
+  - `tests/test_slurm_submission_template.py`
+  - `docs/status/current_project_state.md`
+
+Dry-run evidence after the change:
+
+- command context: 8-GPU, 32-CPU, 256G, `FIIR_TIME_LIMIT=02:00:00`
+- reference node: `gpu40903`
+- selected partition: `gpu4090_128`
+- generated sbatch command:
+  `sbatch --nodes 1 --partition gpu4090_128 --job-name fiir-policy-dryrun --gres gpu:rtx4090:8 --account hmt03 --time 02:00:00 --mem 256000M --ntasks 1 --cpus-per-task 32 ...`
+- no `--nodelist`
+- no `test` partition in the normal long-job path
+
+Verification:
+
+- `python -m py_compile fiir_crystal/slurm_gpu_policy.py scripts/slurm/plan_slurm_job.py scripts/slurm/plan_gpu_job.py`
+- `pytest -q tests/test_slurm_gpu_policy.py tests/test_slurm_submission_template.py`
+- `git diff --check fiir_crystal/slurm_gpu_policy.py scripts/slurm/plan_slurm_job.py scripts/slurm/plan_gpu_job.py scripts/slurm/submit_crystalformer_bulk_gpu.sh scripts/slurm/README.md tests/test_slurm_gpu_policy.py tests/test_slurm_submission_template.py`
+
+## 2026-05-14: Complete Epoch 46003 Matched 64x20 Generation+MLIP Gate
+
+Intent:
+
+- Validate checkpoint epoch 46003 against checkpoint epoch 46002 in generated
+  outputs before considering any additional training.
+- Use the same 64 formulas, 20 samples/formula, seed `20260513`, `K=40`, and
+  strict MACE+CHGNet+MatGL relaxation consensus proxy gate.
+
+Generation:
+
+- configs:
+  `configs/generated/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x20/after_46003_64x20_seed20260513_shards/`
+- output roots:
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x20/after_46003_64x20_seed20260513_shard_001`
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x20/after_46003_64x20_seed20260513_shard_002`
+- original shard 001 job `102599` was cancelled while pending because it was
+  node-pinned to `gpu40903`; shard 001 was resubmitted as `102604` to the free
+  `gpu4090_128` capacity.
+- completed generation jobs:
+  - `102600`, `fiir-f3ep3-64x20-s2`, `COMPLETED`, exit `0:0`, elapsed
+    `00:04:15`, node `gpu40904`
+  - `102604`, `fiir-f3ep3-64x20-s1r`, `COMPLETED`, exit `0:0`, elapsed
+    `00:04:03`, node `gpu40904`
+- collection:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x20/collection_after_46003_64x20_seed20260513/collection_summary.json`
+- generation counts: 64/64 formulas completed, 1280 candidates, 1280
+  DPO-eligible candidates, 544 generated geometry/chemistry preference pairs.
+- strict QA note: 42 empty/zero preference-pair artifacts were reported, the
+  same non-blocking pattern as earlier generation audits; candidate and audit
+  artifacts were complete.
+
+MLIP validation:
+
+- batch:
+  `outputs/mlip_validation_f3_only_mace_chgnet_matgl_consensus_epoch46003_64x20_20260514_batch/after/`
+- selected candidates: 1254
+- selected formulas: 64
+- skipped candidates: 26, all `f1_not_pass`
+- validation jobs:
+  - `102606`, `fiir-mace-f3ep3-64x20`, `COMPLETED`, exit `0:0`, elapsed
+    `00:05:37`, node `gpu40903`, normalized rows 1254
+  - `102608`, `fiir-chgnet-f3ep3-64x20`, `COMPLETED`, exit `0:0`, elapsed
+    `00:03:38`, node `gpu40904`, normalized rows 1254
+  - `102610`, `fiir-matgl-f3ep3-64x20`, `COMPLETED`, exit `0:0`, elapsed
+    `00:05:17`, node `gpu40904`, normalized rows 1254
+- readiness:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x20/offline_validation_after_46003_64x20_seed20260513/readiness_after_summary.json`
+  reports ready true for all three normalized validator files.
+- fatal-log scan: no traceback, exception, OOM, killed, failed, cancelled,
+  timeout, or runtime-error markers in the inspected validation logs; stderr
+  warnings were model/library warnings.
+
+Consensus and comparison:
+
+- consensus:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_f3_only_epoch46003_64x20_after_20260514/`
+- comparison:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x20/offline_validation_comparison_64x20_seed20260513/`
+
+Matched comparison versus checkpoint 46002:
+
+| metric | epoch 46002 | epoch 46003 | delta |
+| --- | ---: | ---: | ---: |
+| candidates | 1280 | 1280 | 0 |
+| F1 fail rate | 0.0273438 | 0.0203125 | -0.00703125 |
+| F2 fail rate | 0 | 0 | 0 |
+| F3 available | 806 | 844 | +38 |
+| strict stable consensus | 465 | 507 | +42 |
+| unstable consensus | 341 | 337 | -4 |
+| disagreement | 439 | 410 | -29 |
+| all-three agreement rate | 0.647390 | 0.673046 | +0.025657 |
+| stable consensus rate | 0.363281 | 0.396094 | +0.0328125 |
+| preference-pair yield | 708 | 544 | -164 |
+| unique sequence fraction | 0.972656 | 0.979688 | +0.00703125 |
+| spacegroup count | 75 | 74 | -1 |
+
+Interpretation:
+
+- Epoch 46003 passed the first matched generated-output proxy gate versus
+  epoch 46002 at 64x20.
+- The improvement is broad across strict stable consensus, F3 availability,
+  all-three agreement, disagreement reduction, F1 pass rate, and unique
+  sequence fraction.
+- The comparison still raises a conservative proxy-divergence flag only because
+  spacegroup coverage decreased by one while stable consensus improved.
+- Treat checkpoint 46003 as the current strongest bounded MLIP-proxy candidate,
+  but do not run another DPO epoch yet. The next evidence step should be a
+  larger matched 64x80 generation+MLIP confirmation or a carefully scoped
+  fixed-candidate DFT pilot if compute policy allows.
+
+## 2026-05-14: Start Epoch 46003 Matched 64x80 No-DFT Confirmation
+
+Intent:
+
+- Defer DFT as a future extension and finish the current no-DFT MLIP-proxy
+  project flow first.
+- Confirm checkpoint epoch 46003 against epoch 46002 at the larger matched
+  64-formula x80-sample scale before making any next training/discovery
+  decision.
+
+Generation and batch preparation:
+
+- configs:
+  `configs/generated/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x80/after_46003_64x80_seed20260514_shards/`
+- output roots:
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x80/after_46003_64x80_seed20260514_shard_001`
+  - `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x80/after_46003_64x80_seed20260514_shard_002`
+- completed generation jobs:
+  - `102636`, `fiir-f3ep3-x80-s1`, `COMPLETED`, exit `0:0`, elapsed
+    `00:04:12`, node `gpu40904`
+  - `102637`, `fiir-f3ep3-x80-s2`, `COMPLETED`, exit `0:0`, elapsed
+    `00:04:13`, node `gpu40904`
+- collection:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x80/collection_after_46003_64x80_seed20260514/collection_summary.json`
+- generation counts: 64/64 formulas completed, 5120 candidates, 5120
+  DPO-eligible candidates, 9584 generated geometry/chemistry preference pairs.
+- strict QA note: 16 empty/zero preference-pair artifacts were reported; this
+  is the same non-blocking pattern as earlier generation audits. Candidate and
+  audit artifacts were complete.
+- MLIP batch:
+  `outputs/mlip_validation_f3_only_mace_chgnet_matgl_consensus_epoch46003_64x80_20260514_batch/after/`
+- selected candidates: 5007
+- selected formulas: 64
+- skipped candidates: 113, all `f1_not_pass`
+
+Validation jobs:
+
+- `102643`, `fiir-mace-f3ep3-x80`, submitted with
+  `--partition h200,h20,h20llm,gpu4090_128 --gres gpu:8`, no `--nodelist`;
+  startup monitor saw it running on `gpu40904` with expected MACE/e3nn
+  `torch.load` warnings only.
+- `102644`, `fiir-chgnet-f3ep3-x80`, submitted with the same partition-wide
+  8-GPU policy; startup monitor window ended while pending `(Resources)` and
+  stderr empty.
+- `102645`, `fiir-matgl-f3ep3-x80`, submitted with the same partition-wide
+  8-GPU policy; startup monitor window ended while pending `(Priority)` and
+  stderr empty.
+
+Prepared follow-up artifacts:
+
+- generation summary for the final comparison:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x80/offline_validation_comparison_64x80_seed20260514/generation_summary.json`
+- finalization helper to run after all three normalized validation files exist:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x80/offline_validation_after_46003_64x80_seed20260514/finalize_after_validation.sh`
+
+When the three jobs finish:
+
+- Confirm each normalized validation file has 5007 rows.
+- Run the finalization helper to create readiness, consensus, and comparison
+  artifacts.
+- Update this log with the matched 64x80 46003-vs-46002 comparison metrics.
+
+## 2026-05-15: Complete Epoch 46003 Matched 64x80 No-DFT Confirmation
+
+Validation completion:
+
+- Slurm queue was empty after completion.
+- completed validation jobs:
+  - `102643`, `fiir-mace-f3ep3-x80`, `COMPLETED`, exit `0:0`, elapsed
+    `00:17:59`, node `gpu40904`, MaxRSS `8824108K`
+  - `102644`, `fiir-chgnet-f3ep3-x80`, `COMPLETED`, exit `0:0`, elapsed
+    `00:16:52`, node `gpu40904`, MaxRSS `8057440K`
+  - `102645`, `fiir-matgl-f3ep3-x80`, `COMPLETED`, exit `0:0`, elapsed
+    `00:18:43`, node `gpu40904`, MaxRSS `9434184K`
+- normalized validation rows:
+  - MACE: 5007
+  - CHGNet: 5007
+  - MatGL: 5007
+- readiness:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x80/offline_validation_after_46003_64x80_seed20260514/readiness_after_summary.json`
+  reports ready true for all three normalized validator files.
+- normalization summaries report 0 issues, 0 malformed rows, 0 formula
+  mismatches, 0 unmatched candidate ids, and 5007 completed rows per
+  validator.
+- fatal-log scan found no traceback, exception, OOM, killed, cancelled,
+  timeout, or runtime-error markers in the validation logs.
+
+Consensus and comparison:
+
+- consensus:
+  `outputs/mlip_validation_ensemble_mace_chgnet_matgl_relax_f3_only_epoch46003_64x80_after_20260514/`
+- comparison:
+  `outputs/f3_only_mace_chgnet_matgl_consensus_epoch46003_vs_46002_64x80/offline_validation_comparison_64x80_seed20260514/`
+
+Matched comparison versus checkpoint 46002:
+
+| metric | epoch 46002 | epoch 46003 | delta |
+| --- | ---: | ---: | ---: |
+| candidates | 5120 | 5120 | 0 |
+| F1 fail rate | 0.0273438 | 0.0220703 | -0.00527344 |
+| F2 fail rate | 0 | 0 | 0 |
+| F3 available | 3198 | 3156 | -42 |
+| strict stable consensus | 1882 | 1889 | +7 |
+| unstable consensus | 1316 | 1267 | -49 |
+| disagreement | 1782 | 1851 | +69 |
+| stable vote count | 8324 | 8462 | +138 |
+| average stable votes/generated candidate | 1.62578 | 1.65273 | +0.026953 |
+| average stable vote fraction/all generated | 0.541927 | 0.550911 | +0.008984 |
+| average stable votes/validated candidate | 1.67149 | 1.69003 | +0.018548 |
+| average stable vote fraction/validated | 0.557162 | 0.563345 | +0.006183 |
+| all-three agreement rate | 0.642169 | 0.630318 | -0.0118511 |
+| stable consensus rate | 0.367578 | 0.368945 | +0.00136719 |
+| preference-pair yield | 12651 | 9584 | -3067 |
+| unique sequence fraction | 0.972656 | 0.977930 | +0.00527344 |
+| spacegroup count | 86 | 85 | -1 |
+| spacegroup entropy | 4.01794 | 4.03207 | +0.0141293 |
+
+Pairwise agreement:
+
+| pair | epoch 46002 | epoch 46003 | delta |
+| --- | ---: | ---: | ---: |
+| CHGNet__MatGL | 0.753012 | 0.749351 | -0.003661 |
+| MACE__CHGNet | 0.777309 | 0.760336 | -0.016974 |
+| MACE__MatGL | 0.754016 | 0.750949 | -0.003067 |
+
+Interpretation:
+
+- The larger 64x80 audit weakly confirms a stable-consensus gain for epoch
+  46003 over 46002, but the gain is much smaller than the 64x20 result.
+- Average stable vote fraction is now treated as an important primary no-DFT
+  model-improvement metric alongside strict stable consensus and F1 fail rate.
+  By this average-stability metric, 46003 improves over 46002 both across all
+  generated structures and within the MLIP-validated subset.
+- The same audit raises a proxy-divergence flag because stable consensus rate
+  increased while all-three agreement decreased, disagreement increased, and
+  space-group count decreased.
+- Treat checkpoint 46003 as a plausible current MLIP-proxy candidate, not a
+  settled performance improvement and not a DFT-backed result.
+- Do not run another DPO epoch from this evidence alone. DFT remains deferred
+  as a future extension; the current track should close the no-DFT project
+  flow with reporting, candidate triage, and reproducibility artifacts.
