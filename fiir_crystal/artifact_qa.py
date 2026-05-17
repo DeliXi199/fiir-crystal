@@ -202,7 +202,7 @@ def render_qa_report(summary: dict[str, Any]) -> str:
         "## Boundary",
         "- This QA gate reads local artifacts only.",
         "- It does not run generation, training, DFT, MLIP, downloads, or external APIs.",
-        "- F3/stability-aware checks require imported successful offline validation evidence.",
+        "- F3/stability-aware checks require imported offline validation or pair-level MLIP force evidence.",
         "",
         "## Summary",
         f"- ready: {summary['ready']}",
@@ -405,7 +405,7 @@ def _check_preference_pairs(
                             row,
                             CRITICAL,
                             "stability_preference_without_f3",
-                            "stability-aware pair lacks successful imported F3/offline validation evidence on both sides",
+                            "stability-aware pair lacks imported F3/offline validation or pair-level MLIP force evidence",
                         )
                     )
             elif row.get("preference_type") not in {GEOMETRY_CHEMISTRY_ONLY, STABILITY_AWARE_OFFLINE_VALIDATION}:
@@ -726,9 +726,13 @@ def _pair_has_imported_f3(
     chosen: dict[str, Any] | None,
     rejected: dict[str, Any] | None,
 ) -> bool:
+    if _pair_has_mlip_force_evidence(row):
+        return True
     if chosen is not None and rejected is not None:
         return _candidate_has_successful_f3(chosen["row"]) and _candidate_has_successful_f3(rejected["row"])
-    return _failure_vector_has_imported_f3(row.get("chosen_failure_vector")) and _failure_vector_has_imported_f3(row.get("rejected_failure_vector"))
+    return _failure_vector_has_imported_f3(row.get("chosen_failure_vector")) and _failure_vector_has_imported_f3(
+        row.get("rejected_failure_vector")
+    )
 
 
 def _candidate_has_successful_f3(row: dict[str, Any]) -> bool:
@@ -744,6 +748,24 @@ def _failure_vector_has_imported_f3(value: Any) -> bool:
         return False
     metadata = value.get("metadata")
     return isinstance(metadata, dict) and metadata.get("f3_status") == "offline_validation_imported"
+
+
+def _pair_has_mlip_force_evidence(row: dict[str, Any]) -> bool:
+    metadata = row.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("f3_pair_rule") != "same_formula_rank_neighbor_f3_pairing_v1":
+        return False
+    return _has_mlip_force_evidence(metadata.get("chosen_mlip_force_evidence")) and _has_mlip_force_evidence(
+        metadata.get("rejected_mlip_force_evidence")
+    )
+
+
+def _has_mlip_force_evidence(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    forces = value.get("model_forces")
+    if not isinstance(forces, dict):
+        return False
+    return all(_optional_float(forces.get(model)) is not None for model in ("MACE", "CHGNet", "MatGL"))
 
 
 def _has_sequence_or_equivalent(row: dict[str, Any], sequence_key: str, side: str) -> bool:

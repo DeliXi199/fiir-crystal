@@ -1,0 +1,112 @@
+{
+  "crystalformer_work_dir": "external/CrystalFormer",
+  "checkpoint_dir": "outputs/crystalformer_dpo_runs/f3_rank_neighbor_continuation2_64x80_20260516/after_checkpoint/beta_0.1_label_0_gamma_0_adam_bs_32_lr_1e-05_decay_0_clip_1_A_119_W_28_N_21_Nf_5_Kx_16_Kl_4_h0_256_l_16_H_8_k_32_m_256_e_256_drop_0.1",
+  "output_root": "outputs/f3_rank_neighbor_continuation2_64x80_20260516/after_64x80_seed20260514_shard_001",
+  "parser_backend": "none",
+  "stability_mode": "unavailable_without_offline_validation",
+  "source_format": "auto",
+  "skip_existing": true,
+  "defaults": {
+    "num_samples": 80,
+    "top_k": 40
+  },
+  "command_template": "python ./main.py --optimizer none --restore_path {checkpoint_dir} --K {top_k} --temperature 1.0 --top_p 1.0 --seed 20260514 --num_samples {num_samples} --batchsize {num_samples} --formula {formula} --save_path {raw_output_dir}/output.csv",
+  "formulas": [
+    {
+      "formula": "BaTiO3"
+    },
+    {
+      "formula": "SrTiO3"
+    },
+    {
+      "formula": "CaTiO3"
+    },
+    {
+      "formula": "PbTiO3"
+    },
+    {
+      "formula": "BaZrO3"
+    },
+    {
+      "formula": "SrZrO3"
+    },
+    {
+      "formula": "CaZrO3"
+    },
+    {
+      "formula": "PbZrO3"
+    },
+    {
+      "formula": "BaHfO3"
+    },
+    {
+      "formula": "SrHfO3"
+    },
+    {
+      "formula": "CaHfO3"
+    },
+    {
+      "formula": "PbHfO3"
+    },
+    {
+      "formula": "BaSnO3"
+    },
+    {
+      "formula": "SrSnO3"
+    },
+    {
+      "formula": "CaSnO3"
+    },
+    {
+      "formula": "PbSnO3"
+    },
+    {
+      "formula": "BaCeO3"
+    },
+    {
+      "formula": "SrCeO3"
+    },
+    {
+      "formula": "CaCeO3"
+    },
+    {
+      "formula": "PbCeO3"
+    },
+    {
+      "formula": "BaGeO3"
+    },
+    {
+      "formula": "SrGeO3"
+    },
+    {
+      "formula": "CaGeO3"
+    },
+    {
+      "formula": "PbGeO3"
+    },
+    {
+      "formula": "BaSiO3"
+    },
+    {
+      "formula": "SrSiO3"
+    },
+    {
+      "formula": "CaSiO3"
+    },
+    {
+      "formula": "PbSiO3"
+    },
+    {
+      "formula": "BaThO3"
+    },
+    {
+      "formula": "SrThO3"
+    },
+    {
+      "formula": "CaThO3"
+    },
+    {
+      "formula": "PbThO3"
+    }
+  ]
+}

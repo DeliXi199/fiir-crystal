@@ -12,6 +12,7 @@ DEFAULT_GPU_PARTITIONS="auto"
 
 FIIR_SUBMIT_SCRIPT="${FIIR_SUBMIT_SCRIPT:-scripts/slurm/run_crystalformer_bulk_test.slurm}"
 FIIR_GPU_PARTITIONS="${FIIR_GPU_PARTITIONS:-${DEFAULT_GPU_PARTITIONS}}"
+FIIR_GPU_BLOCKED_PARTITIONS="${FIIR_GPU_BLOCKED_PARTITIONS:-gpu4090}"
 FIIR_GPU_ACCELERATOR="${FIIR_GPU_ACCELERATOR:-cuda}"
 FIIR_GPU_MIN_GPUS="${FIIR_GPU_MIN_GPUS:-1}"
 FIIR_GPU_MIN_CPUS="${FIIR_GPU_MIN_CPUS:-1}"
@@ -152,6 +153,13 @@ if ! is_auto_partition_set "$FIIR_GPU_PARTITIONS"; then
   done
 fi
 
+for partition in ${FIIR_GPU_BLOCKED_PARTITIONS//,/ }; do
+  normalized="$(normalize_partition_name "$partition")"
+  if [ -n "$normalized" ]; then
+    planner_args+=("--blocked-partition" "$normalized")
+  fi
+done
+
 if [ -n "$FIIR_SLURM_ACCOUNT" ]; then
   planner_args+=("--account" "$FIIR_SLURM_ACCOUNT")
 fi
@@ -166,10 +174,11 @@ fi
 
 echo "FIIR GPU submission policy:"
 echo "  gpu_partitions=${FIIR_GPU_PARTITIONS}"
+echo "  blocked_partitions=${FIIR_GPU_BLOCKED_PARTITIONS:-none}"
 if is_auto_partition_set "$FIIR_GPU_PARTITIONS"; then
-  echo "  partition_filter=auto_all_cuda_compatible"
+  echo "  partition_filter=auto_all_cuda_compatible_except_blocked"
 else
-  echo "  partition_filter=explicit_allowlist"
+  echo "  partition_filter=explicit_allowlist_minus_blocked"
 fi
 echo "  accelerator=${FIIR_GPU_ACCELERATOR}"
 echo "  min_gpus=${FIIR_GPU_MIN_GPUS}"

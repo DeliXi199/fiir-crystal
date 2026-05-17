@@ -56,6 +56,7 @@ DEFAULT_GPU_WEIGHTS: dict[str, int] = dict(TF32_GPU_WEIGHTS)
 DEFAULT_FLEXIBLE_QUEUE_GPUS = 8
 DEFAULT_FLEXIBLE_QUEUE_CPUS = 32
 DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB = 256_000
+DEFAULT_BLOCKED_GPU_PARTITIONS = ("gpu4090",)
 
 CUDA_PARTITION_HINTS = ("h200", "h20", "h800", "gpu4090", "test")
 NON_CUDA_PARTITION_HINTS = ("amd", "intel")
@@ -136,6 +137,7 @@ class GpuSchedulingConfig:
     accelerator: str = "cuda"
     precision_profile: str = DEFAULT_GPU_PRECISION_PROFILE
     allowed_partitions: tuple[str, ...] = ()
+    blocked_partitions: tuple[str, ...] = DEFAULT_BLOCKED_GPU_PARTITIONS
     min_gpus: int = 1
     min_cpus: int = 1
     min_memory_mb: int = 0
@@ -154,6 +156,16 @@ class GpuSchedulingConfig:
     def __post_init__(self) -> None:
         profile = normalize_precision_profile(self.precision_profile)
         object.__setattr__(self, "precision_profile", profile)
+        object.__setattr__(
+            self,
+            "allowed_partitions",
+            normalize_partition_sequence(self.allowed_partitions),
+        )
+        object.__setattr__(
+            self,
+            "blocked_partitions",
+            normalize_partition_sequence(self.blocked_partitions),
+        )
         queue_mode = self.queue_mode.strip().lower()
         if queue_mode not in {"auto", "pinned", "flexible"}:
             raise ValueError("GPU queue_mode must be one of: auto, pinned, flexible")
@@ -344,7 +356,7 @@ def select_best_gpu_node(
     for node in nodes:
         if not node_is_eligible(node, config):
             continue
-        partition = select_partition(node, config.allowed_partitions)
+        partition = select_partition(node, config.allowed_partitions, config.blocked_partitions)
         if not partition:
             continue
         if not partition_allows_time_limit(partition, config):
@@ -394,23 +406,25 @@ def node_is_eligible(node: GpuNode, config: GpuSchedulingConfig) -> bool:
         return False
     if node.free_gpus < config.min_gpus:
         return False
-    if config.allowed_partitions and not set(node.partitions).intersection(config.allowed_partitions):
+    eligible_partitions = available_partitions_for_config(node.partitions, config)
+    if not eligible_partitions:
         return False
-    if config.accelerator == "cuda" and not node_is_cuda_compatible(node):
+    if config.accelerator == "cuda" and not node_is_cuda_compatible(node, eligible_partitions):
         return False
     return True
 
 
-def node_is_cuda_compatible(node: GpuNode) -> bool:
-    model = node.gpu_model_key
+def node_is_cuda_compatible(node: GpuNode, partitions: Sequence[str] | None = None) -> bool:
+    candidate_partitions = tuple(node.partitions if partitions is None else partitions)
+    model = infer_gpu_model_key(node.gpu_type, candidate_partitions)
     if model in {"amd40g", "amd80g", "intel80g"}:
         return False
-    partitions = tuple(partition.lower() for partition in node.partitions)
-    if any(marker in partition for partition in partitions for marker in NON_CUDA_PARTITION_HINTS):
+    lower_partitions = tuple(partition.lower() for partition in candidate_partitions)
+    if any(marker in partition for partition in lower_partitions for marker in NON_CUDA_PARTITION_HINTS):
         return False
     if model in {"h200", "h800", "h20", "rtx4090"}:
         return True
-    return any(any(hint in partition for hint in CUDA_PARTITION_HINTS) for partition in partitions)
+    return any(any(hint in partition for hint in CUDA_PARTITION_HINTS) for partition in lower_partitions)
 
 
 def partition_allows_time_limit(partition: str, config: GpuSchedulingConfig) -> bool:
@@ -734,6 +748,7 @@ def config_to_dict(
         "accelerator": config.accelerator,
         "precision_profile": config.precision_profile,
         "allowed_partitions": list(config.allowed_partitions),
+        "blocked_partitions": list(config.blocked_partitions),
         "min_gpus": config.min_gpus,
         "min_cpus": config.min_cpus,
         "min_memory_mb": config.min_memory_mb,
@@ -759,11 +774,15 @@ def effective_queue_mode(config: GpuSchedulingConfig) -> str:
 
 
 def flexible_queue_partitions(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -> tuple[str, ...]:
-    allowed = tuple(config.allowed_partitions)
+    allowed = tuple(
+        partition
+        for partition in config.allowed_partitions
+        if not partition_is_blocked(partition, config)
+    )
     if allowed:
         matching_from_nodes: list[str] = []
         for node in queueable_gpu_nodes(nodes, config):
-            for partition in node.partitions:
+            for partition in available_partitions_for_config(node.partitions, config):
                 if partition in allowed and partition_allows_time_limit(partition, config):
                     matching_from_nodes.append(partition)
         if matching_from_nodes:
@@ -789,7 +808,7 @@ def flexible_queue_partitions(nodes: Sequence[GpuNode], config: GpuSchedulingCon
         )
     partitions: list[str] = []
     for node in queueable_gpu_nodes(nodes, config):
-        for partition in node.partitions:
+        for partition in available_partitions_for_config(node.partitions, config):
             if not partition_allows_time_limit(partition, config):
                 continue
             if partition not in partitions:
@@ -820,7 +839,7 @@ def queueable_gpu_nodes(nodes: Sequence[GpuNode], config: GpuSchedulingConfig) -
             key=lambda node: (
                 -node.total_gpus,
                 -node.total_cpus,
-                select_partition(node, config.allowed_partitions),
+                select_partition(node, config.allowed_partitions, config.blocked_partitions),
                 node.name,
             ),
         )
@@ -832,21 +851,47 @@ def node_is_queueable(node: GpuNode, config: GpuSchedulingConfig) -> bool:
         return False
     if node.total_gpus < config.queue_min_gpus:
         return False
-    if config.allowed_partitions and not set(node.partitions).intersection(config.allowed_partitions):
+    eligible_partitions = available_partitions_for_config(node.partitions, config)
+    if not eligible_partitions:
         return False
-    if config.accelerator == "cuda" and not node_is_cuda_compatible(node):
+    if config.accelerator == "cuda" and not node_is_cuda_compatible(node, eligible_partitions):
         return False
     return True
 
 
-def select_partition(node: GpuNode, allowed_partitions: Sequence[str] = ()) -> str:
+def select_partition(
+    node: GpuNode,
+    allowed_partitions: Sequence[str] = (),
+    blocked_partitions: Sequence[str] = (),
+) -> str:
     partitions = [partition for partition in node.partitions if partition and partition != "(null)"]
+    if blocked_partitions:
+        blocked = set(normalize_partition_sequence(blocked_partitions))
+        partitions = [partition for partition in partitions if partition not in blocked]
     if allowed_partitions:
-        allowed = set(allowed_partitions)
+        allowed = set(normalize_partition_sequence(allowed_partitions))
         partitions = [partition for partition in partitions if partition in allowed]
     if not partitions:
         return ""
     return sorted(partitions, key=lambda item: (_partition_rank(item), item))[0]
+
+
+def available_partitions_for_config(
+    partitions: Sequence[str], config: GpuSchedulingConfig
+) -> tuple[str, ...]:
+    candidates = tuple(
+        partition
+        for partition in normalize_partition_sequence(partitions)
+        if not partition_is_blocked(partition, config)
+    )
+    if config.allowed_partitions:
+        allowed = set(config.allowed_partitions)
+        candidates = tuple(partition for partition in candidates if partition in allowed)
+    return candidates
+
+
+def partition_is_blocked(partition: str, config: GpuSchedulingConfig) -> bool:
+    return normalize_partition_name(partition) in set(config.blocked_partitions)
 
 
 def infer_gpu_model_key(gpu_type: str, partitions: Sequence[str]) -> str:
@@ -903,13 +948,21 @@ def parse_sinfo_cpu_counts(value: str) -> tuple[int, int, int, int]:
 
 
 def parse_partition_list(values: Iterable[str]) -> tuple[str, ...]:
+    return normalize_partition_sequence(values)
+
+
+def normalize_partition_sequence(values: Iterable[str]) -> tuple[str, ...]:
     partitions: list[str] = []
     for value in values:
-        for item in value.split(","):
-            normalized = item.strip().rstrip("*")
-            if normalized and normalized not in partitions:
+        for item in str(value).split(","):
+            normalized = normalize_partition_name(item)
+            if normalized and normalized != "(null)" and normalized not in partitions:
                 partitions.append(normalized)
     return tuple(partitions)
+
+
+def normalize_partition_name(value: str) -> str:
+    return str(value).strip().rstrip("*")
 
 
 def normalize_precision_profile(value: str) -> str:

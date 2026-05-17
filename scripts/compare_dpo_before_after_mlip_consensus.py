@@ -118,8 +118,8 @@ def _side_metrics(
 ) -> dict[str, Any]:
     candidate_count = _int_or_count(generation.get("total_candidates"), candidate_index)
     dpo_eligible_count = int(generation.get("dpo_eligible_count") or _count_truthy(candidate_index, "dpo_eligible"))
-    f1_fail_count = int(generation.get("f1_fail_count") or _count_label(candidate_index, "f1_label", "fail"))
-    f2_fail_count = int(generation.get("f2_fail_count") or _count_label(candidate_index, "f2_label", "fail"))
+    f1_fail_count = _failure_count(generation, candidate_index, "f1_fail_count", "f1_not_pass", "f1_label")
+    f2_fail_count = _failure_count(generation, candidate_index, "f2_fail_count", "f2_not_pass", "f2_label")
     stable_count = int(consensus.get("stable_consensus_count") or 0)
     unstable_count = int(consensus.get("unstable_consensus_count") or 0)
     disagreement_count = int(consensus.get("disagreement_or_unavailable_count") or 0)
@@ -367,6 +367,22 @@ def _count_truthy(rows: list[dict[str, Any]], key: str) -> int:
 
 def _count_label(rows: list[dict[str, Any]], key: str, label: str) -> int:
     return sum(1 for row in rows if row.get(key) == label)
+
+
+def _failure_count(
+    generation: dict[str, Any],
+    rows: list[dict[str, Any]],
+    explicit_key: str,
+    skipped_reason: str,
+    row_label_key: str,
+) -> int:
+    explicit = generation.get(explicit_key)
+    if isinstance(explicit, int):
+        return explicit
+    skipped_counts = generation.get("skipped_reason_counts")
+    if isinstance(skipped_counts, dict) and isinstance(skipped_counts.get(skipped_reason), int):
+        return int(skipped_counts[skipped_reason])
+    return _count_label(rows, row_label_key, "fail")
 
 
 def _sum_numeric_counts(counts: dict[str, Any]) -> int:

@@ -20,6 +20,7 @@ from fiir_crystal.slurm_scheduling import (
     DEFAULT_FLEXIBLE_QUEUE_CPUS,
     DEFAULT_FLEXIBLE_QUEUE_GPUS,
     DEFAULT_FLEXIBLE_QUEUE_MEMORY_MB,
+    DEFAULT_BLOCKED_GPU_PARTITIONS,
     GPU_WEIGHT_PROFILES,
     CpuSchedulingConfig,
     GpuSchedulingConfig,
@@ -63,6 +64,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     gpu = parser.add_argument_group("GPU policy")
     gpu.add_argument("--partition", action="append", default=[], help="Allowed GPU partition; repeat or comma-separate.")
+    gpu.add_argument(
+        "--blocked-partition",
+        action="append",
+        default=list(DEFAULT_BLOCKED_GPU_PARTITIONS),
+        help=(
+            "GPU partition to exclude globally; repeat or comma-separate. "
+            "Defaults to the account-inaccessible bare gpu4090 partition."
+        ),
+    )
     gpu.add_argument("--accelerator", choices=("cuda", "any"), default="cuda")
     gpu.add_argument("--min-gpus", type=int, default=1)
     gpu.add_argument("--min-cpus", type=int, default=1)
@@ -183,6 +193,7 @@ def _build_plan(args: argparse.Namespace) -> dict[str, Any]:
         accelerator=args.accelerator,
         precision_profile=args.precision_profile,
         allowed_partitions=parse_partition_list(args.partition),
+        blocked_partitions=parse_partition_list(args.blocked_partition),
         min_gpus=args.min_gpus,
         min_cpus=args.min_cpus,
         min_memory_mb=args.min_memory_mb,
@@ -241,6 +252,7 @@ def _print_summary(plan: dict[str, Any], output_json: str | None) -> None:
         node = selection["selected_node"]
         print(f"  reference_node: {node['name'] if node else 'slurm_assigned_at_runtime'}")
         print(f"  selected_partition: {selection['selected_partition']}")
+        print(f"  blocked_partitions: {','.join(plan['config']['blocked_partitions']) or 'none'}")
         print(f"  gpu_model: {node['gpu_model_key'] if node else 'slurm_assigned_at_runtime'}")
         print(f"  precision_profile: {plan['config']['precision_profile']}")
         print(f"  gpu_queue_mode: {plan['config']['effective_queue_mode']}")

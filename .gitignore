@@ -26,3 +26,5 @@ log_*.log
 err_*.err
 logs/slurm/*.log
 logs/slurm/*.err
+logs/slurm/**/*.log
+logs/slurm/**/*.err

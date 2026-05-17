@@ -214,6 +214,41 @@ def test_partition_filter_can_choose_idle_4090_node() -> None:
     assert "gpu:rtx4090:8" in plan["sbatch_args"]
 
 
+def test_default_gpu_policy_blocks_bare_4090_but_keeps_named_4090_partitions() -> None:
+    text = """
+NodeName=gpu4090bare Arch=x86_64 CoresPerSocket=32
+   CPUAlloc=0 CPUEfctv=64 CPUTot=64 CPULoad=0.01
+   Gres=gpu:rtx4090:8
+   State=IDLE ThreadsPerCore=1
+   Partitions=gpu4090
+   RealMemory=500000 AllocMem=0 FreeMem=490000
+   CfgTRES=cpu=64,mem=500000M,billing=64,gres/gpu=8
+   AllocTRES=
+
+NodeName=gpu4090named Arch=x86_64 CoresPerSocket=16
+   CPUAlloc=0 CPUEfctv=32 CPUTot=32 CPULoad=0.01
+   Gres=gpu:rtx4090:4
+   State=IDLE ThreadsPerCore=1
+   Partitions=gpu4090_8
+   RealMemory=500000 AllocMem=0 FreeMem=490000
+   CfgTRES=cpu=32,mem=500000M,billing=32,gres/gpu=4
+   AllocTRES=
+"""
+    plan = plan_gpu_job(
+        parse_scontrol_nodes(text),
+        GpuSchedulingConfig(accelerator="cuda", time_limit_minutes=120),
+        time_limit="02:00:00",
+    )
+
+    assert plan["ready"] is True
+    assert plan["config"]["blocked_partitions"] == ["gpu4090"]
+    assert plan["selection"]["selected_node"]["name"] == "gpu4090named"
+    assert plan["selection"]["selected_partition"] == "gpu4090_8"
+    candidate_names = [item["node"]["name"] for item in plan["selection"]["candidates"]]
+    assert "gpu4090bare" not in candidate_names
+    assert plan["sbatch"]["request"]["partition"] == "gpu4090_8"
+
+
 def test_pinned_memory_request_is_capped_at_real_memory() -> None:
     text = """
 NodeName=gpu40903 Arch=x86_64 CoresPerSocket=32

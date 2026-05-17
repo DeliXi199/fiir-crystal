@@ -1,6 +1,6 @@
 # Current Project State
 
-Last updated: 2026-05-14, Asia/Shanghai.
+Last updated: 2026-05-17, Asia/Shanghai.
 
 This file is the compact project memory for future Codex sessions. Read it
 after `AGENTS.md` and before making roadmap, experiment, or implementation
@@ -67,6 +67,31 @@ decisions.
   not run another DPO epoch yet. DFT is deferred as a future extension; first
   finish the current no-DFT project flow end to end. All labels are MLIP
   relaxation proxy evidence, not DFT or hull-confirmed stability.
+- Formula-holdout generalization audit
+  `outputs/f3_formula_holdout_64x80_20260517` is complete. It compares the
+  original CrystalFormer checkpoint against F3 continuation-2 checkpoint 46003
+  on 64 held-out ABO3 formulas from
+  `configs/formula_banks/perovskite_128.json` positions 65-128, which were not
+  used in the F3 rank-neighbor DPO pair mining formula bank. The matched setup
+  is 64 formulas x 80 samples, seed 20260517, top-k 40, with three-MLIP
+  relaxation consensus. Original-vs-46003 strict stable consensus improved
+  from 1493 to 1694 (+201), stable consensus rate from 0.291602 to 0.330859
+  (+0.039258), stable vote count from 7062 to 7730 (+668), average stable vote
+  fraction across all generated structures from 0.459766 to 0.503255
+  (+0.043490), F1 fail rate from 0.024023 to 0.021875 (-0.002148), unique
+  sequence fraction from 0.975977 to 0.978125 (+0.002148), and space-group
+  count from 84 to 85 (+1). F3-available count decreased from 3218 to 3193
+  (-25), all-three agreement rate decreased from 0.643986 to 0.637580
+  (-0.006407), disagreement increased from 1779 to 1815 (+36), and
+  preference-pair yield decreased from 11199 to 9737 (-1462), so keep the
+  conservative proxy-divergence flag. CHGNet and MatGL F3-cont2 strict SLURM
+  tasks each had one failed row; their raw 5008-row outputs were normalized to
+  5007 F3-available rows and final report job 106148 completed successfully.
+  The generated holdout submission script has been corrected to use non-strict
+  MLIP validation (`FIIR_MACE_STRICT=0`, `FIIR_MLIP_STRICT=0`) so single
+  failed relaxations are recorded as unavailable rows instead of blocking the
+  whole dependency chain. Bare `gpu4090` remains excluded; allowed GPU
+  partitions are `h200,h20,h20llm,gpu4090_8,gpu4090_128`.
 
 ## Important Guidance State
 
@@ -79,6 +104,16 @@ decisions.
   - `docs/guidance/04_paper3_discovery_pipeline.md`
 - Failure schema now includes optional F4 novelty leakage and F5
   synthesizability fields, while FSAL/DPO pair mining remains focused on F1-F3.
+- Baseline rule for all future F-metric experiments: compare trained models
+  against the original CrystalFormer checkpoint
+  `external/checkpoints/crystalformer/alex20s_csp`, and start each DPO training
+  run from that same original checkpoint unless the user explicitly asks for a
+  continuation experiment. Once a matching original-model baseline dataset has
+  been generated and MLIP/other validation evidence has been computed for a
+  fixed formula bank, sampling setup, and validator setup, reuse that original
+  baseline artifact for later comparisons instead of regenerating it. New
+  trained checkpoints should generate their own matched after samples and be
+  compared back to the cached original-model baseline.
 - F4 is now scoped as a fixed-reference novelty/leakage audit boundary, not a
   dynamic intra-batch diversity score and not a DPO training target. The core
   package plans local audit tasks and imports externally computed F4 evidence,
@@ -205,6 +240,15 @@ decisions.
   assigns the final node at runtime. GPU start-now eligibility is based on free
   GPU count only, not idle CPU or free-memory counts. CPU and memory are request
   sizing knobs.
+- The global GPU policy blocks the bare `gpu4090` partition by default because
+  the project account cannot submit there. Named 4090 partitions such as
+  `gpu4090_8` and `gpu4090_128` remain eligible in both auto and explicit
+  allowlist modes.
+- Do not treat `gpu4090_8` or `gpu4090_128` as forbidden. For many small
+  CrystalFormer/MLIP relaxation loops they can be competitive with or faster
+  than H200 because Python/ASE/model orchestration and per-structure overhead
+  can dominate raw GPU throughput. Use controlled same-job benchmarks before
+  drawing hardware conclusions.
 - `FIIR_GPU_RESERVED_NODES_FILE` is retained only for backward-compatible
   provenance. The GPU submitter no longer appends selected nodes or treats a
   submitted partition-wide job as claiming a fixed node.
@@ -233,6 +277,225 @@ decisions.
 ## Latest Durable Results
 
 These are the currently important artifacts and counts.
+
+### Clean Original-Baseline F3 Rank-Neighbor Run
+
+- Run root:
+  `outputs/f3_rank_neighbor_from_initial_64x80_20260515/`
+- This is the first completed F3 rank-neighbor run that follows the current
+  baseline rule end to end: pair mining used original-model 64x80 samples,
+  training started from the original CrystalFormer checkpoint, and validation
+  compares the trained checkpoint back to the original-model baseline.
+- Formula bank and generation settings:
+  64 formulas x 80 samples, seed `20260514`, `top_k=40`,
+  `temperature=1.0`, `top_p=1.0`.
+- Original baseline checkpoint:
+  `external/checkpoints/crystalformer/alex20s_csp`
+- Trained checkpoint:
+  `outputs/crystalformer_dpo_runs/f3_rank_neighbor_from_initial_64x80_20260515/after_checkpoint/beta_0.1_label_0_gamma_0_adam_bs_32_lr_1e-05_decay_0_clip_1_A_119_W_28_N_21_Nf_5_Kx_16_Kl_4_h0_256_l_16_H_8_k_32_m_256_e_256_drop_0.1`
+- Training manifest:
+  `outputs/crystalformer_dpo_runs/f3_rank_neighbor_from_initial_64x80_20260515/dpo_smoke_manifest.json`
+  records `base_checkpoint_dir=external/checkpoints/crystalformer/alex20s_csp`,
+  checkpoint start epoch `46000`, target epoch `46001`, and 7311 prepared
+  F3 DPO pairs.
+- Pair build:
+  `outputs/dpo_preferences/f3_rank_neighbor_from_initial_64x80_20260515/dpo_preferences/preference_summary.json`
+  matched 4961 F3 candidates from original samples, with 1830 good candidates,
+  320 near-miss candidates, and 7311 same-formula rank-neighbor pairs using
+  `good_force_max=0.05`, `near_miss_force_max=0.10`, and
+  `rank_neighbor_count=5`.
+- All submitted SLURM jobs `103486`-`103499` completed with exit code `0:0`.
+  The only notable log line was CrystalFormer training reporting
+  `failed to update opt_state from checkpoint`; the job completed and wrote the
+  expected after checkpoint.
+- Original/base generation:
+  64/64 formulas completed, 5120 candidates, 5120 DPO eligible, 146 F1
+  failures, 0 F2 failures, 4974 selected for MLIP validation.
+- Trained/after generation:
+  64/64 formulas completed, 5120 candidates, 5120 DPO eligible, 103 F1
+  failures, 0 F2 failures, 5017 selected for MLIP validation.
+- Final original-vs-after comparison:
+  `outputs/f3_rank_neighbor_from_initial_64x80_20260515/offline_validation_comparison_base_vs_after_64x80_seed20260514/summary.json`
+- Detailed analysis:
+  `outputs/f3_rank_neighbor_from_initial_64x80_20260515/detailed_validation_analysis_base_vs_after_64x80_seed20260514/summary.json`
+- Main MLIP-proxy deltas versus the original model:
+  strict three-MLIP stable consensus 1830 -> 1928 (+98), stable consensus rate
+  0.357422 -> 0.376563 (+0.019141), F3-available count 3225 -> 3281 (+56),
+  all-three agreement rate 0.648372 -> 0.653976 (+0.005605),
+  disagreement 1749 -> 1736 (-13), unstable consensus 1395 -> 1353 (-42),
+  stable vote count 8128 -> 8402 (+274), and average stable vote fraction over
+  all generated structures 0.529167 -> 0.547005 (+0.017839).
+- Secondary generation-quality/diversity deltas:
+  F1 fail rate 0.028516 -> 0.020117 (-0.008398), unique sequence fraction
+  0.971484 -> 0.979883 (+0.008398), space-group count 84 -> 83 (-1), and
+  space-group entropy 4.022043 -> 4.027174 (+0.005131).
+- Per-validator stable labels increased:
+  CHGNet 2506 -> 2651 (+145), MACE 2735 -> 2785 (+50), MatGL 2887 -> 2966
+  (+79).
+- Three-MLIP per-sample mean `force_max` stats are stored at
+  `outputs/f3_rank_neighbor_from_initial_64x80_20260515/detailed_validation_analysis_base_vs_after_64x80_seed20260514/ensemble_mean_force_stats.json`.
+  Across all validated samples, the median three-MLIP mean force moved
+  0.090740 -> 0.085374 eV/Angstrom (-0.005366) and the mean moved
+  0.297173 -> 0.267028 (-0.030145). For strict stable-consensus samples, the
+  median moved 0.042012 -> 0.041577 (-0.000435) and the mean moved
+  0.036820 -> 0.035409 (-0.001412).
+- High-confidence after candidates:
+  1928 candidates pass all three MLIPs at force <= 0.05 eV/Angstrom across all
+  64 formulas; tier A <= 0.03 has 284 candidates, tier B <= 0.04 has 78
+  candidates, and tier C has 1566 candidates.
+- Top improved formulas by strict stable consensus count:
+  SrThO3 +13, DyAlO3 +11, GdAlO3 +11, BaSiO3 +11, LaScO3 +10.
+- Top regressed formulas:
+  SmAlO3 -17, CaTiO3 -13, CaSiO3 -8, HoAlO3 -8, BaSnO3 -7, YInO3 -7.
+- Proxy-divergence screen remains flagged because stable consensus improved
+  while space-group count dipped by 1. This is a caution flag only; the main
+  no-DFT MLIP-proxy signal is positive versus the original model.
+- Caveat: all F3 labels here are MACE+CHGNet+MatGL relaxation proxy evidence,
+  not DFT or hull-confirmed stability.
+
+### F3 Rank-Neighbor Continuation Probe
+
+- Run root:
+  `outputs/f3_rank_neighbor_continuation_64x80_20260516/`
+- This was an explicit user-requested continuation probe, so it is an exception
+  to the default "start every new experiment from the original checkpoint"
+  rule. It started from the current F3 checkpoint above, mined fresh F3 pairs
+  from current-checkpoint 64x80 samples, trained one more DPO epoch, and then
+  compared both current-vs-continued and original-vs-continued.
+- Training manifest:
+  `outputs/crystalformer_dpo_runs/f3_rank_neighbor_continuation_64x80_20260516/dpo_smoke_manifest.json`
+  records checkpoint start epoch `46001`, target epoch `46002`, and 8272
+  prepared F3 DPO pairs.
+- Pair build:
+  `outputs/dpo_preferences/f3_rank_neighbor_continuation_64x80_20260516/dpo_preferences/preference_summary.json`
+  matched 5004 F3 candidates from current-model samples, with 1928 good
+  candidates, 332 near-miss candidates, and 8272 same-formula rank-neighbor
+  pairs using `good_force_max=0.05`, `near_miss_force_max=0.10`, and
+  `rank_neighbor_count=5`.
+- All submitted continuation SLURM jobs `104227`-`104234` completed with exit
+  code `0:0`.
+- Continuation-after generation:
+  64/64 formulas completed, 5120 candidates, 5120 DPO eligible, 116 F1
+  failures, 0 F2 failures, and 5004 selected for MLIP validation.
+- Current-vs-continued comparison:
+  `outputs/f3_rank_neighbor_continuation_64x80_20260516/offline_validation_comparison_current_vs_continued_64x80_seed20260514/summary.json`
+  shows strict three-MLIP stable consensus 1928 -> 2066 (+138), stable
+  consensus rate 0.376563 -> 0.403516 (+0.026953), F3-available count
+  3281 -> 3280 (-1), all-three agreement rate 0.653976 -> 0.655476
+  (+0.001499), disagreement 1736 -> 1724 (-12), unstable consensus
+  1353 -> 1214 (-139), stable vote count 8402 -> 8750 (+348), and average
+  stable vote fraction over all generated structures 0.547005 -> 0.569661
+  (+0.022656). F1 fail rate worsened slightly from 0.020117 to 0.022656
+  (+0.002539), and unique sequence fraction fell from 0.979883 to 0.977344
+  (-0.002539), while space-group count improved from 83 to 85 and entropy
+  improved from 4.027174 to 4.042433. The current-vs-continued
+  proxy-divergence screen remains flagged due the slight F1/unique-fraction
+  tradeoff.
+- Original-vs-continued comparison:
+  `outputs/f3_rank_neighbor_continuation_64x80_20260516/offline_validation_comparison_original_vs_continued_64x80_seed20260514/summary.json`
+  shows cumulative strict stable consensus 1830 -> 2066 (+236), stable
+  consensus rate 0.357422 -> 0.403516 (+0.046094), F3-available count
+  3225 -> 3280 (+55), all-three agreement rate 0.648372 -> 0.655476
+  (+0.007104), disagreement 1749 -> 1724 (-25), unstable consensus
+  1395 -> 1214 (-181), stable vote count 8128 -> 8750 (+622), average stable
+  vote fraction over all generated structures 0.529167 -> 0.569661
+  (+0.040495), F1 fail rate 0.028516 -> 0.022656 (-0.005859), unique
+  sequence fraction 0.971484 -> 0.977344 (+0.005859), space-group count
+  84 -> 85 (+1), and entropy 4.022043 -> 4.042433 (+0.020390). The
+  original-vs-continued proxy-divergence screen is false.
+- Three-MLIP per-sample mean `force_max`:
+  - Current-vs-continued all-validated mean force 0.267028 -> 0.263901
+    eV/Angstrom (-0.003128, -1.17%); strict-stable mean force
+    0.035409 -> 0.034400 (-0.001009, -2.85%).
+  - Original-vs-continued all-validated mean force 0.297173 -> 0.263901
+    (-0.033273, -11.20%); strict-stable mean force 0.036820 -> 0.034400
+    (-0.002420, -6.57%).
+- High-confidence continued candidates:
+  2066 candidates pass all three MLIPs at force <= 0.05 eV/Angstrom across all
+  64 formulas; tier A <= 0.03 has 365 candidates, tier B <= 0.04 has 80
+  candidates, and tier C has 1621 candidates.
+- Top current-vs-continued improved formulas:
+  CaTiO3 +15, SmAlO3 +13, SrCeO3 +12, PrAlO3 +12, NdInO3 +9, BaZrO3 +9,
+  HoAlO3 +9, SrThO3 +7.
+- Top current-vs-continued regressed formulas:
+  HoInO3 -14, NdScO3 -9, DyInO3 -6, YGaO3 -6, BaSiO3 -5, NdGaO3 -5,
+  PrScO3 -5.
+- Interpretation: one additional F3 rank-neighbor DPO epoch still improved the
+  MLIP proxy stability signal substantially, but because F1 fail rate and
+  unique sequence fraction degraded slightly versus the current checkpoint,
+  avoid blindly continuing many more epochs without a smaller gate or a fixed
+  candidate likelihood/stability audit. Against the original baseline, the
+  continuation checkpoint is the strongest no-DFT MLIP-proxy result so far.
+
+### F3 Rank-Neighbor Second Continuation Probe
+
+- Run root:
+  `outputs/f3_rank_neighbor_continuation2_64x80_20260516/`
+- This was a second explicit user-requested continuation probe. It started from
+  the `epoch_046002` F3 continuation checkpoint, mined fresh F3 pairs from that
+  checkpoint's 64x80 samples, trained one more DPO epoch to `epoch_046003`, and
+  compared both latest-vs-continuation2 and original-vs-continuation2.
+- Training manifest:
+  `outputs/crystalformer_dpo_runs/f3_rank_neighbor_continuation2_64x80_20260516/dpo_smoke_manifest.json`
+  records checkpoint start epoch `46002`, target epoch `46003`, and 8006
+  prepared F3 DPO pairs.
+- Pair build:
+  `outputs/dpo_preferences/f3_rank_neighbor_continuation2_64x80_20260516/dpo_preferences/preference_summary.json`
+  matched 4993 F3 candidates from latest-model samples, with 2065 good
+  candidates, 307 near-miss candidates, and 8006 same-formula rank-neighbor
+  pairs. Two formulas lacked either good or near-miss candidates.
+- All submitted second-continuation SLURM jobs `104503`-`104510` completed with
+  exit code `0:0`.
+- Second-continuation-after generation:
+  64/64 formulas completed, 5120 candidates, 5120 DPO eligible, 99 F1
+  failures, 0 F2 failures, and 5021 selected for MLIP validation.
+- Latest-vs-continuation2 comparison:
+  `outputs/f3_rank_neighbor_continuation2_64x80_20260516/offline_validation_comparison_latest_vs_continuation2_64x80_seed20260514/summary.json`
+  shows strict three-MLIP stable consensus 2066 -> 2208 (+142), stable
+  consensus rate 0.403516 -> 0.431250 (+0.027734), F3-available count
+  3280 -> 3405 (+125), all-three agreement rate 0.655476 -> 0.678152
+  (+0.022676), disagreement 1724 -> 1616 (-108), unstable consensus
+  1214 -> 1197 (-17), stable vote count 8750 -> 9075 (+325), and average
+  stable vote fraction over all generated structures 0.569661 -> 0.590820
+  (+0.021159). F1 fail rate improved from 0.022656 to 0.019336 (-0.003320)
+  and unique sequence fraction improved from 0.977344 to 0.980664
+  (+0.003320). Space-group count fell from 85 to 84 and entropy fell from
+  4.042433 to 4.004449, so latest-vs-continuation2 still has a
+  proxy-divergence caution flag for diversity/coverage.
+- Original-vs-continuation2 comparison:
+  `outputs/f3_rank_neighbor_continuation2_64x80_20260516/offline_validation_comparison_original_vs_continuation2_64x80_seed20260514/summary.json`
+  shows cumulative strict stable consensus 1830 -> 2208 (+378), stable
+  consensus rate 0.357422 -> 0.431250 (+0.073828), F3-available count
+  3225 -> 3405 (+180), all-three agreement rate 0.648372 -> 0.678152
+  (+0.029780), disagreement 1749 -> 1616 (-133), unstable consensus
+  1395 -> 1197 (-198), stable vote count 8128 -> 9075 (+947), average stable
+  vote fraction over all generated structures 0.529167 -> 0.590820
+  (+0.061654), F1 fail rate 0.028516 -> 0.019336 (-0.009180), unique
+  sequence fraction 0.971484 -> 0.980664 (+0.009180), and space-group count
+  remained 84. Entropy is slightly lower than original, 4.022043 -> 4.004449
+  (-0.017594), but the original-vs-continuation2 proxy-divergence screen is
+  false.
+- Three-MLIP per-sample mean `force_max`:
+  - Latest-vs-continuation2 all-validated mean force 0.263901 -> 0.258733
+    eV/Angstrom (-0.005167, -1.96%); strict-stable mean force
+    0.034400 -> 0.034327 (-0.000073, -0.21%).
+  - Original-vs-continuation2 all-validated mean force 0.297173 -> 0.258733
+    (-0.038440, -12.94%); strict-stable mean force 0.036820 -> 0.034327
+    (-0.002493, -6.77%).
+- High-confidence continuation2 candidates:
+  2208 candidates pass all three MLIPs at force <= 0.05 eV/Angstrom across all
+  64 formulas; tier A <= 0.03 has 381 candidates, tier B <= 0.04 has 82
+  candidates, and tier C has 1745 candidates.
+- Stable-consensus trajectory at 64x80:
+  original 1830 -> F3 from original 1928 -> continuation1 2066 ->
+  continuation2 2208.
+- Interpretation: the second continuation still improved the main MLIP-proxy
+  stability metrics and improved F1/unique sequence rate versus continuation1,
+  so the optimization has not obviously saturated. However, pair yield and
+  near-miss candidates are thinning, and space-group entropy declined versus
+  continuation1. Treat `epoch_046003` as the strongest no-DFT MLIP-proxy
+  checkpoint so far, but run a fixed-candidate likelihood/stability audit or a
+  smaller gate before continuing many more epochs.
 
 ### CrystalFormer Workspace
 
@@ -1361,12 +1624,11 @@ pytest -q
 ## Recommended Next Step
 
 Do not claim a finished performance improvement yet, but checkpoint 46003 is
-now the current strongest bounded MLIP-proxy candidate. It preserved the
-fixed-panel likelihood direction and improved the matched 64x20 generated
-output proxy gate versus checkpoint 46002: stable consensus +42, F3-available
-+38, all-three agreement +0.025657, disagreement -29, and F1 fail rate
--0.007031. Do not run another DPO epoch yet. The next best step is a larger
-matched generation+MLIP confirmation for 46003, preferably 64x80 using the
-new partition-wide GPU scheduler, or a carefully scoped fixed-candidate DFT
-pilot if compute policy allows. The evidence remains MLIP relaxation proxy and
-model-likelihood evidence, not DFT or hull-confirmed stability.
+now the current strongest bounded MLIP-proxy candidate. The immediate next
+step is to wait for the formula-holdout audit jobs 106115-106126 and compare
+original versus 46003 on formulas that were not used for F3 pair mining. If the
+holdout audit also improves strict stable consensus, F3 availability, average
+stable vote fraction, force summaries, and F1/unique/diversity diagnostics,
+then checkpoint 46003 becomes a much stronger no-DFT generalization candidate.
+The evidence remains MLIP relaxation proxy and model-likelihood evidence, not
+DFT or hull-confirmed stability.

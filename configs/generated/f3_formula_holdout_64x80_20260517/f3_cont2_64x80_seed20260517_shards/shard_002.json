@@ -1,0 +1,112 @@
+{
+  "crystalformer_work_dir": "external/CrystalFormer",
+  "checkpoint_dir": "outputs/crystalformer_dpo_runs/f3_rank_neighbor_continuation2_64x80_20260516/after_checkpoint/beta_0.1_label_0_gamma_0_adam_bs_32_lr_1e-05_decay_0_clip_1_A_119_W_28_N_21_Nf_5_Kx_16_Kl_4_h0_256_l_16_H_8_k_32_m_256_e_256_drop_0.1",
+  "output_root": "outputs/f3_formula_holdout_64x80_20260517/f3_cont2_64x80_seed20260517_shard_002",
+  "parser_backend": "none",
+  "stability_mode": "unavailable_without_offline_validation",
+  "source_format": "auto",
+  "skip_existing": true,
+  "defaults": {
+    "num_samples": 80,
+    "top_k": 40
+  },
+  "command_template": "python ./main.py --optimizer none --restore_path {checkpoint_dir} --K {top_k} --temperature 1.0 --top_p 1.0 --seed 20260517 --num_samples {num_samples} --batchsize {num_samples} --formula {formula} --save_path {raw_output_dir}/output.csv",
+  "formulas": [
+    {
+      "formula": "LiNbO3"
+    },
+    {
+      "formula": "NaNbO3"
+    },
+    {
+      "formula": "KNbO3"
+    },
+    {
+      "formula": "RbNbO3"
+    },
+    {
+      "formula": "CsNbO3"
+    },
+    {
+      "formula": "AgNbO3"
+    },
+    {
+      "formula": "CuNbO3"
+    },
+    {
+      "formula": "TlNbO3"
+    },
+    {
+      "formula": "LiTaO3"
+    },
+    {
+      "formula": "NaTaO3"
+    },
+    {
+      "formula": "KTaO3"
+    },
+    {
+      "formula": "RbTaO3"
+    },
+    {
+      "formula": "CsTaO3"
+    },
+    {
+      "formula": "AgTaO3"
+    },
+    {
+      "formula": "CuTaO3"
+    },
+    {
+      "formula": "TlTaO3"
+    },
+    {
+      "formula": "LiVO3"
+    },
+    {
+      "formula": "NaVO3"
+    },
+    {
+      "formula": "KVO3"
+    },
+    {
+      "formula": "RbVO3"
+    },
+    {
+      "formula": "CsVO3"
+    },
+    {
+      "formula": "AgVO3"
+    },
+    {
+      "formula": "CuVO3"
+    },
+    {
+      "formula": "TlVO3"
+    },
+    {
+      "formula": "LiSbO3"
+    },
+    {
+      "formula": "NaSbO3"
+    },
+    {
+      "formula": "KSbO3"
+    },
+    {
+      "formula": "RbSbO3"
+    },
+    {
+      "formula": "CsSbO3"
+    },
+    {
+      "formula": "AgSbO3"
+    },
+    {
+      "formula": "CuSbO3"
+    },
+    {
+      "formula": "TlSbO3"
+    }
+  ]
+}

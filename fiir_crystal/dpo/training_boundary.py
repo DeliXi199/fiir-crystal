@@ -341,7 +341,25 @@ def _has_pair_f3_evidence(row: dict[str, Any]) -> bool:
     rejected = row.get("rejected_failure_vector")
     if not isinstance(chosen, dict) or not isinstance(rejected, dict):
         return False
-    return chosen.get("f3_stability") is not None and rejected.get("f3_stability") is not None
+    if chosen.get("f3_stability") is not None and rejected.get("f3_stability") is not None:
+        return True
+    metadata = row.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    return (
+        metadata.get("f3_pair_rule") == "same_formula_rank_neighbor_f3_pairing_v1"
+        and _has_mlip_force_evidence(metadata.get("chosen_mlip_force_evidence"))
+        and _has_mlip_force_evidence(metadata.get("rejected_mlip_force_evidence"))
+    )
+
+
+def _has_mlip_force_evidence(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    forces = value.get("model_forces")
+    if not isinstance(forces, dict):
+        return False
+    return all(_optional_float(forces.get(model)) is not None for model in ("MACE", "CHGNet", "MatGL"))
 
 
 def _has_full_sequence(value: Any) -> bool:

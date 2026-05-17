@@ -65,11 +65,14 @@ job only writes a bulk plan or validation summary. It exports
 `FIIR_CONDA_ENV=crystalformer` and requires a JAX GPU backend by default. In
 the default `auto` queue mode, it chooses a currently free non-`test` GPU
 partition and submits without `--nodelist`, so SLURM can place the job on any
-node in that partition with enough free GPUs. If no normal GPU partition can
-start now, it queues without `--nodelist` using the broad fallback request of 8
-GPUs, 32 CPUs, and 256000M memory by default. The explicit memory request
-avoids SLURM expanding a broad multi-partition queue job to a full-node memory
-request such as 2000000M. In both modes it passes `FIIR_TOTAL_GPUS` plus
+node in that partition with enough free GPUs. The bare `gpu4090` partition is
+blocked by default because the project account cannot submit there; named
+4090 partitions such as `gpu4090_8` and `gpu4090_128` remain eligible. If no
+normal GPU partition can start now, it queues without `--nodelist` using the
+broad fallback request of 8 GPUs, 32 CPUs, and 256000M memory by default. The
+explicit memory request avoids SLURM expanding a broad multi-partition queue
+job to a full-node memory request such as 2000000M. In both modes it passes
+`FIIR_TOTAL_GPUS` plus
 `CUDA_VISIBLE_DEVICES` into the bulk runner. The runner then assigns one
 visible CUDA device per concurrent CrystalFormer subprocess and divides the
 requested CPU cores across those subprocesses. Generation subprocesses default
@@ -93,6 +96,9 @@ Useful GPU submitter overrides:
   currently available CUDA-compatible GPU nodes and chooses by free resources
   and the active precision profile. Use an explicit value such as
   `gpu4090_8` only when you intentionally want to restrict placement.
+- `FIIR_GPU_BLOCKED_PARTITIONS`: comma- or space-separated GPU partitions that
+  should never be selected. Default `gpu4090` blocks only the account-inaccessible
+  bare partition and does not block `gpu4090_8` or `gpu4090_128`.
 - `FIIR_GPU_ACCELERATOR`: `cuda` or `any`, default `cuda`.
 - `FIIR_GPU_MIN_GPUS`: minimum free GPU count used to decide whether a
   partition can start now. For larger CrystalFormer generation, MLIP
@@ -248,7 +254,9 @@ GPU-only compatibility wrapper.
 The GPU submit wrapper defaults to `FIIR_GPU_PARTITIONS=auto`, which means it
 does not restrict the planner to a fixed partition like `gpu4090_8`. Every GPU
 submission should therefore be selected from the current cluster state unless a
-caller deliberately provides a partition allowlist.
+caller deliberately provides a partition allowlist. The global blocked
+partition list still applies in both modes; by default only the bare `gpu4090`
+partition is removed from consideration.
 
 The GPU submit wrapper also defaults to `FIIR_GPU_QUEUE_MODE=auto`. In auto
 mode, the planner first chooses the best currently free eligible normal GPU
@@ -309,6 +317,9 @@ Useful options:
 - `--partition gpu4090_8`: restrict selection to one or more partitions. Omit
   this option for resource-aware selection across all CUDA-compatible GPU
   partitions.
+- `--blocked-partition gpu4090`: exclude one or more partitions from all GPU
+  selection and flexible queue fallback. The default blocks bare `gpu4090`;
+  `gpu4090_8` and `gpu4090_128` are separate partition names and remain usable.
 - `--layout single-task`: one task receives the requested CPUs and GPUs.
 - `--layout one-task-per-gpu`: one task per requested GPU, with CPU cores divided
   across tasks.
