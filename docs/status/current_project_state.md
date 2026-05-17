@@ -92,6 +92,28 @@ decisions.
   failed relaxations are recorded as unavailable rows instead of blocking the
   whole dependency chain. Bare `gpu4090` remains excluded; allowed GPU
   partitions are `h200,h20,h20llm,gpu4090_8,gpu4090_128`.
+- A new user-requested larger formal F3 training/evaluation chain has been
+  submitted as
+  `outputs/f3_big_rank_neighbor_from_original_128x160_20260517`. It follows
+  the baseline rule: generate pair-mining samples from the original
+  CrystalFormer checkpoint `external/checkpoints/crystalformer/alex20s_csp`,
+  build F3 good-vs-near-miss same-formula rank-neighbor pairs from three-MLIP
+  relaxation force evidence, train one DPO epoch from the original checkpoint,
+  then generate matched after samples and run the same three-MLIP evaluation.
+  Scale: 128 ABO3 formulas x 160 samples = 20480 generated candidates per
+  side, seed 20260517, top-k 40, temperature 1.0, top-p 1.0. The chain uses
+  non-strict MLIP validation and the allowed GPU partition list
+  `h200,h20,h20llm,gpu4090_8,gpu4090_128`; bare `gpu4090` remains excluded.
+  Submitted SLURM jobs: base generation 106544-106547, base collect 106548,
+  base MLIP 106549-106551, pair build / DPO prepare 106552, train 106553,
+  after generation 106554-106557, after collect 106558, after MLIP
+  106559-106561, final report 106562. As of submission, 106544 was running on
+  `gpu4090_8` / `gpu40902`; all later jobs were pending on dependencies.
+  When results are ready, compare against the original baseline using the full
+  reporting template: settings, F1/F2, F3 consensus, per-MLIP stable counts,
+  average stable vote fraction, force mean/median/p90/p95, disagreement,
+  pairwise agreement, pair yield, uniqueness/diversity, formula-level
+  improvements/regressions, and proxy-divergence caveats.
 
 ## Important Guidance State
 

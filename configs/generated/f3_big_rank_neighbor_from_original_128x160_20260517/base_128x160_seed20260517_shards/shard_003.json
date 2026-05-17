@@ -1,0 +1,112 @@
+{
+  "crystalformer_work_dir": "external/CrystalFormer",
+  "checkpoint_dir": "external/checkpoints/crystalformer/alex20s_csp",
+  "output_root": "outputs/f3_big_rank_neighbor_from_original_128x160_20260517/base_128x160_seed20260517_shard_003",
+  "parser_backend": "none",
+  "stability_mode": "unavailable_without_offline_validation",
+  "source_format": "auto",
+  "skip_existing": true,
+  "defaults": {
+    "num_samples": 160,
+    "top_k": 40
+  },
+  "command_template": "python ./main.py --optimizer none --restore_path {checkpoint_dir} --K {top_k} --temperature 1.0 --top_p 1.0 --seed 20260517 --num_samples {num_samples} --batchsize {num_samples} --formula {formula} --save_path {raw_output_dir}/output.csv",
+  "formulas": [
+    {
+      "formula": "LaFeO3"
+    },
+    {
+      "formula": "YFeO3"
+    },
+    {
+      "formula": "NdFeO3"
+    },
+    {
+      "formula": "PrFeO3"
+    },
+    {
+      "formula": "SmFeO3"
+    },
+    {
+      "formula": "GdFeO3"
+    },
+    {
+      "formula": "DyFeO3"
+    },
+    {
+      "formula": "HoFeO3"
+    },
+    {
+      "formula": "LaCoO3"
+    },
+    {
+      "formula": "YCoO3"
+    },
+    {
+      "formula": "NdCoO3"
+    },
+    {
+      "formula": "PrCoO3"
+    },
+    {
+      "formula": "SmCoO3"
+    },
+    {
+      "formula": "GdCoO3"
+    },
+    {
+      "formula": "DyCoO3"
+    },
+    {
+      "formula": "HoCoO3"
+    },
+    {
+      "formula": "LaCrO3"
+    },
+    {
+      "formula": "YCrO3"
+    },
+    {
+      "formula": "NdCrO3"
+    },
+    {
+      "formula": "PrCrO3"
+    },
+    {
+      "formula": "SmCrO3"
+    },
+    {
+      "formula": "GdCrO3"
+    },
+    {
+      "formula": "DyCrO3"
+    },
+    {
+      "formula": "HoCrO3"
+    },
+    {
+      "formula": "LaMnO3"
+    },
+    {
+      "formula": "YMnO3"
+    },
+    {
+      "formula": "NdMnO3"
+    },
+    {
+      "formula": "PrMnO3"
+    },
+    {
+      "formula": "SmMnO3"
+    },
+    {
+      "formula": "GdMnO3"
+    },
+    {
+      "formula": "DyMnO3"
+    },
+    {
+      "formula": "HoMnO3"
+    }
+  ]
+}

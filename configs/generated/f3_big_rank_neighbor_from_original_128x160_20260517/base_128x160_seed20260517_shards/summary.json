@@ -1,0 +1,14 @@
+{
+  "formula_bank": "configs/formula_banks/perovskite_128.json",
+  "formula_count": 128,
+  "shard_count": 4,
+  "formulas_per_shard": 32,
+  "num_samples": 160,
+  "total_num_samples": 20480,
+  "shard_files": [
+    "configs/generated/f3_big_rank_neighbor_from_original_128x160_20260517/base_128x160_seed20260517_shards/shard_001.json",
+    "configs/generated/f3_big_rank_neighbor_from_original_128x160_20260517/base_128x160_seed20260517_shards/shard_002.json",
+    "configs/generated/f3_big_rank_neighbor_from_original_128x160_20260517/base_128x160_seed20260517_shards/shard_003.json",
+    "configs/generated/f3_big_rank_neighbor_from_original_128x160_20260517/base_128x160_seed20260517_shards/shard_004.json"
+  ]
+}
